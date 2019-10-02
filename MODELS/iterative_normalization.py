@@ -154,7 +154,7 @@ class IterNorm(torch.nn.Module):
 
 class IterNormRotation(torch.nn.Module):
     def __init__(self, num_features, num_groups=1, num_channels=None, T=5, dim=4, tau=1e-4, eps=1e-5, momentum=0.1, affine=True,
-                mode = 0, *args, **kwargs):
+                mode = -1, *args, **kwargs):
         super(IterNormRotation, self).__init__()
         # assert dim == 4, 'IterNorm is not support 2D'
         self.T = T
@@ -189,8 +189,11 @@ class IterNormRotation(torch.nn.Module):
         self.register_buffer('running_wm', torch.eye(num_channels).expand(num_groups, num_channels, num_channels))
         # running rotation matrix
         self.register_buffer('running_rot', torch.eye(num_channels).expand(num_groups, num_channels, num_channels))
-        # saving previous G
-        #self.register_buffer('previous_G', torch.eye(num_channels).expand(num_groups, num_channels, num_channels))
+        # sum Gradient, need to take average later
+        self.register_buffer('sum_G', torch.zeros(num_groups, num_channels, num_channels))
+        # counter, number of gradient for each concept
+        self.register_buffer("counter", torch.ones(num_channels)*0.001)
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -198,6 +201,46 @@ class IterNormRotation(torch.nn.Module):
         if self.affine:
             torch.nn.init.ones_(self.weight)
             torch.nn.init.zeros_(self.bias)
+
+    def update_rotation_matrix(self):
+        size_R = self.running_rot.size()
+        with torch.no_grad():
+            G = self.sum_G/self.counter.reshape(-1,1)
+            R = self.running_rot.clone()
+            for i in range(2):
+                tau = 1000
+                alpha = 0
+                beta = 100000000
+                c1 = 1e-4
+                c2 = 0.9
+                
+                A = torch.einsum('gin,gjn->gij', G, R) - torch.einsum('gin,gjn->gij', R, G) # GR^T - RG^T
+                I = torch.eye(size_R[2]).expand(*size_R).cuda()
+                dF_0 = -0.5 * (A ** 2).sum()
+                while True:
+                    Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
+                    Y_tau = torch.bmm(Q, R)
+                    F_X = (G[:,0,:] * R[:,0,:]).sum()
+                    F_Y_tau = (G[:,0,:] * Y_tau[:,0,:]).sum()
+                    dF_tau = -torch.bmm(torch.einsum('gni,gnj->gij', G, (I + 0.5 * tau * A).inverse()), torch.bmm(A,0.5*(R+Y_tau)))[0,:,:].trace()
+                    #print(F_Y_tau - F_X - c1*tau*dF_0)
+                    #print(c2*dF_0 - dF_tau)
+                    if F_Y_tau > F_X + c1*tau*dF_0 + 1e-18:
+                        beta = tau
+                        tau = (beta+alpha)/2
+                    elif dF_tau  + 1e-18 < c2*dF_0:
+                        alpha = tau
+                        tau = (beta+alpha)/2
+                    else:
+                        break
+                #print(tau, F_Y_tau)
+                Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
+                R = torch.bmm(Q, R)
+            
+            self.running_rot = R #self.momentum * R + (1. - self.momentum) * self.running_rot
+            self.sum_G = torch.zeros(*size_R)
+            self.counter = torch.ones(size_R[-1]) * 0.001
+
 
     def forward(self, X: torch.Tensor):
         X_hat = iterative_normalization_py.apply(X, self.running_mean, self.running_wm, self.num_channels, self.T,
@@ -208,49 +251,10 @@ class IterNormRotation(torch.nn.Module):
         size_R = self.running_rot.size()
         X_hat = X_hat.view(size_X[0], size_R[0], size_R[2], *size_X[2:])
         # updating the rotation matrix, using the concept dataset
-        if self.mode == 1:
+        if self.mode>=0:
             with torch.no_grad():
-                assert size_R[0] == 1
-                R = self.running_rot.clone()
-                for i in range(2):
-                    
-                    tau = 1000
-                    alpha = 0
-                    beta = 100000000
-                    c1 = 1e-4
-                    c2 = 0.9
-                    #print(R)
-                    G = torch.zeros(*size_R).cuda()
-                    G[:,0,:] = -X_hat.mean((0,3,4))
-                    #if i==0 or i==4:
-                    #print(i,(G[:,0,:] * R[:,0,:]).sum())
-                    A = torch.einsum('gin,gjn->gij', G, R) - torch.einsum('gin,gjn->gij', R, G) # GR^T - RG^T
-                    I = torch.eye(size_R[2]).expand(*size_R).cuda()
-                    dF_0 = -0.5 * (A ** 2).sum()
-                    while True:
-                        Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
-                        Y_tau = torch.bmm(Q, R)
-                        F_X = (G[:,0,:] * R[:,0,:]).sum()
-                        F_Y_tau = (G[:,0,:] * Y_tau[:,0,:]).sum()
-                        dF_tau = -torch.bmm(torch.einsum('gni,gnj->gij', G, (I + 0.5 * tau * A).inverse()), torch.bmm(A,0.5*(R+Y_tau)))[0,:,:].trace()
-                        #print(F_Y_tau - F_X - c1*tau*dF_0)
-                        #print(c2*dF_0 - dF_tau)
-                        if F_Y_tau > F_X + c1*tau*dF_0 + 1e-18:
-                            beta = tau
-                            tau = (beta+alpha)/2
-                        elif dF_tau  + 1e-18 < c2*dF_0:
-                            alpha = tau
-                            tau = (beta+alpha)/2
-                        else:
-                            break
-                    #print(tau, F_Y_tau)
-                    Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
-                    R = torch.bmm(Q, R)
-                    
-
-                self.running_rot = R #self.momentum * R + (1. - self.momentum) * self.running_rot
-                        
-                    # print(torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot).mean((0,1,3,4))[0])
+                self.sum_G[:,self.mode,:] = -X_hat.mean((0,3,4))
+                self.counter[self.mode] += 1
 
         X_hat = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
         #print(size_X)
