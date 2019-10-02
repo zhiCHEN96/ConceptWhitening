@@ -48,6 +48,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
+parser.add_argument('--concepts', type=str, required=True)
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -110,13 +111,13 @@ def main():
         model = ResidualNetTransfer(9, [int(x) for x in args.whitened_layers.split(',')], model_file ='./checkpoints/RESNET18_PLACES_VANILLA_model_best.pth.tar')
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
-    param_list = get_param_list(model, [int(x) for x in args.whitened_layers.split(',')])
-    # optimizer = torch.optim.SGD(model.parameters(), args.lr,
-    #                         momentum=args.momentum,
-    #                         weight_decay=args.weight_decay)
-    optimizer = torch.optim.SGD(param_list, args.lr,
+    # param_list = get_param_list(model, [int(x) for x in args.whitened_layers.split(',')])
+    optimizer = torch.optim.SGD(model.parameters(), args.lr,
                             momentum=args.momentum,
                             weight_decay=args.weight_decay)
+    # optimizer = torch.optim.SGD(param_list, args.lr,
+    #                         momentum=args.momentum,
+    #                         weight_decay=args.weight_decay)
 
     # optimizer = torch.optim.Adam(model.parameters(), lr = args.lr,
     #                         weight_decay=args.weight_decay)
@@ -169,8 +170,9 @@ def main():
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
 
-    concept_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(conceptdir, transforms.Compose([
+    concept_loaders = [
+        torch.utils.data.DataLoader(
+        datasets.ImageFolder(os.path.join(conceptdir, concept), transforms.Compose([
             transforms.RandomSizedCrop(224),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
@@ -178,6 +180,8 @@ def main():
         ])),
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
+        for concept in args.concepts.split(',')
+    ]
 
     val_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(valdir, transforms.Compose([
@@ -251,7 +255,7 @@ def main():
         adjust_learning_rate(optimizer, epoch)
         
         # train for one epoch
-        train(train_loader, concept_loader, model, criterion, optimizer, epoch)
+        train(train_loader, concept_loaders, model, criterion, optimizer, epoch)
         
         # evaluate on validation set
         prec1 = validate(val_loader, model, criterion, epoch)
@@ -306,22 +310,7 @@ def get_optimal_direction(concept_loader, model, whitened_layers):
     return mean
 
 
-def rotate_cpt(concept_loader, model, mean):
-    model.eval()
-    model.module.change_mode(1)
-    with torch.no_grad():
-        for i in range(10):
-            print(i)
-            for X, _ in concept_loader:
-                X_var = torch.autograd.Variable(X).cuda()
-                model(X_var)
-                R0 = model.module.layer2[0].bn1.running_rot[0,0,:]
-                print(torch.dot(R0,mean)/(torch.dot(mean,mean).sqrt()))
-                #print(torch.dot(R0,R0))
-                #break
-    model.module.change_mode(0)
-
-def train(train_loader, concept_loader, model, criterion, optimizer, epoch):
+def train(train_loader, concept_loaders, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -335,13 +324,15 @@ def train(train_loader, concept_loader, model, criterion, optimizer, epoch):
     for i, (input, target) in enumerate(train_loader):
         if (i + 1) % 2 == 0:
             model.eval()
-            model.module.change_mode(1)
             with torch.no_grad():
-                for j, (X, _) in enumerate(concept_loader):
-                    X_var = torch.autograd.Variable(X).cuda()
-                    model(X_var)
-                    break
-            model.module.change_mode(0)
+                for concept_index, concept_loader in enumerate(concept_loaders):
+                    model.module.change_mode(concept_index)
+                    for j, (X, _) in enumerate(concept_loader):
+                        X_var = torch.autograd.Variable(X).cuda()
+                        model(X_var)
+                        break
+                model.module.update_rotation_matrix()
+                model.module.change_mode(-1)
             model.train()
         # measure data loading time
         data_time.update(time.time() - end)
@@ -435,7 +426,7 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
     # switch to evaluate mode
     model.eval()
     from shutil import copyfile
-    dst = '/usr/xtmp/zhichen/attention-module/plot/'
+    dst = '/usr/xtmp/zhichen/attention-module/plot2/'
     layer_list = whitened_layers.split(',')
     folder = dst + '_'.join(layer_list) + '_rot/'
     # print(folder)
@@ -480,12 +471,19 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
 
 
     begin = 0
-    end = 1
+    end = len(args.concepts.split(','))
     if print_other:
-        begin = 1
-        end = 11
+        begin = len(args.concepts.split(','))
+        end = 15
+    concepts = args.concepts.split(',')
     with torch.no_grad():
         for k in range(begin, end):
+            if k < len(concepts):
+                output_path = os.path.join(folder, concepts[k])
+            else:
+                output_path = os.path.join(folder, 'other_dimension_'+str(k))
+            if not os.path.exists(output_path):
+                os.mkdir(output_path)
             paths = []
             vals = None
             for i, (input, _, path) in enumerate(val_loader):
@@ -509,10 +507,7 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
                     src = arr[j][1]
                     # print(src)
                     # print(folder+'layer'+layer+'_'+str(j+1)+'.jpg')
-                    if print_other:
-                        copyfile(src, folder+'layer'+layer+'_'+str(j+1)+'_dim'+str(k)+'.jpg')
-                    else:
-                        copyfile(src, folder+'layer'+layer+'_'+str(j+1)+'.jpg')
+                    copyfile(src, output_path+'/'+'layer'+layer+'_'+str(j+1)+'.jpg')
     # with torch.no_grad():
     #     arr = []
     #     for input, _, path in val_loader:

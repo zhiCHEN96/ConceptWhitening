@@ -220,8 +220,8 @@ class IterNormRotation(torch.nn.Module):
                 while True:
                     Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
                     Y_tau = torch.bmm(Q, R)
-                    F_X = (G[:,0,:] * R[:,0,:]).sum()
-                    F_Y_tau = (G[:,0,:] * Y_tau[:,0,:]).sum()
+                    F_X = (G[:,:,:] * R[:,:,:]).sum()
+                    F_Y_tau = (G[:,:,:] * Y_tau[:,:,:]).sum()
                     dF_tau = -torch.bmm(torch.einsum('gni,gnj->gij', G, (I + 0.5 * tau * A).inverse()), torch.bmm(A,0.5*(R+Y_tau)))[0,:,:].trace()
                     #print(F_Y_tau - F_X - c1*tau*dF_0)
                     #print(c2*dF_0 - dF_tau)
@@ -238,8 +238,8 @@ class IterNormRotation(torch.nn.Module):
                 R = torch.bmm(Q, R)
             
             self.running_rot = R #self.momentum * R + (1. - self.momentum) * self.running_rot
-            self.sum_G = torch.zeros(*size_R)
-            self.counter = torch.ones(size_R[-1]) * 0.001
+            self.sum_G = torch.zeros(*size_R).cuda()
+            self.counter = (torch.ones(size_R[-1]) * 0.001).cuda()
 
 
     def forward(self, X: torch.Tensor):

@@ -232,6 +232,18 @@ class ResNet(nn.Module):
                 self.layer3[whitened_layer-layers[0]-layers[1]-1].bn1.mode = mode
             elif whitened_layer <= layers[0] + layers[1] + layers[2] + layers[3]:
                 self.layer4[whitened_layer-layers[0]-layers[1]-layers[2]-1].bn1.mode = mode
+    
+    def update_rotation_matrix(self):
+        layers = self.layers
+        for whitened_layer in self.whitened_layers:
+            if whitened_layer <= layers[0]:
+                self.layer1[whitened_layer-1].bn1.update_rotation_matrix()
+            elif whitened_layer <= layers[0] + layers[1]:
+                self.layer2[whitened_layer-layers[0]-1].bn1.update_rotation_matrix()
+            elif whitened_layer <= layers[0] + layers[1] + layers[2]:
+                self.layer3[whitened_layer-layers[0]-layers[1]-1].bn1.update_rotation_matrix()
+            elif whitened_layer <= layers[0] + layers[1] + layers[2] + layers[3]:
+                self.layer4[whitened_layer-layers[0]-layers[1]-layers[2]-1].bn1.update_rotation_matrix()
 
     def _make_layer(self, block, planes, blocks, stride=1, att_type=None):
         downsample = None
@@ -346,6 +358,18 @@ class ResidualNetTransfer(nn.Module):
                 self.model.layer3[whitened_layer-layers[0]-layers[1]-1].bn1.mode = mode
             elif whitened_layer <= layers[0] + layers[1] + layers[2] + layers[3]:
                 self.model.layer4[whitened_layer-layers[0]-layers[1]-layers[2]-1].bn1.mode = mode
+    
+    def update_rotation_matrix(self):
+        layers = self.layers
+        for whitened_layer in self.whitened_layers:
+            if whitened_layer <= layers[0]:
+                self.model.layer1[whitened_layer-1].bn1.update_rotation_matrix()
+            elif whitened_layer <= layers[0] + layers[1]:
+                self.model.layer2[whitened_layer-layers[0]-1].bn1.update_rotation_matrix()
+            elif whitened_layer <= layers[0] + layers[1] + layers[2]:
+                self.model.layer3[whitened_layer-layers[0]-layers[1]-1].bn1.update_rotation_matrix()
+            elif whitened_layer <= layers[0] + layers[1] + layers[2] + layers[3]:
+                self.model.layer4[whitened_layer-layers[0]-layers[1]-layers[2]-1].bn1.update_rotation_matrix()
 
     def forward(self, x):
         return self.model(x)
