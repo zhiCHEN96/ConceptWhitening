@@ -190,8 +190,7 @@ class ResNet(nn.Module):
         else:
             self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
 
-        #self.bw1 = nn.BatchNorm2d(64)
-        self.bw1 = IterNorm(64, num_groups = 1, momentum = 0.1) # nn.BatchNorm2d(64)
+        self.bw1 = IterNorm(64, num_groups = 1, momentum = 0.1)
         self.relu = nn.ReLU(inplace=True)
 
         if att_type=='BAM':
@@ -253,8 +252,6 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        # for p in self.conv1.parameters():
-        #     print(p.name, p.data)
         x = self.bw1(x)
         x = self.relu(x)
         if self.network_type == "ImageNet":
