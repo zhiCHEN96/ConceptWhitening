@@ -16,6 +16,9 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 from MODELS.model_resnet import *
 from PIL import ImageFile, Image
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 model_names = sorted(name for name in models.__dict__
@@ -202,54 +205,8 @@ def main():
         ])),
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
-    # # Cifar 10
-    # transform_train = transforms.Compose([
-    #     transforms.RandomCrop(32, padding=4),
-    #     transforms.RandomHorizontalFlip(),
-    #     transforms.ToTensor(),
-    #     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    # ])
 
-    # transform_test = transforms.Compose([
-    #     transforms.ToTensor(),
-    #     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    # ])
-
-    # trainset = datasets.CIFAR10(root=args.data, train=True, download=True, transform=transform_train)
-    # train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
-
-    # testset = datasets.CIFAR10(root=args.data, train=False, download=True, transform=transform_test)
-    # val_loader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
-
-    # if args.evaluate:
-    #      #validate(val_loader, model, criterion, 0)
-    #      print(best_prec1)
-    #      mean = get_optimal_direction(concept_loader, model, args.whitened_layers)
-    #      rotate_cpt(concept_loader, model, mean)
-    #      print_concept_top5(val_loader_2, model, args.whitened_layers)
-    #      return
-
-    # from PIL import Image
-    # for i, (input, target) in enumerate(train_loader):
-    #     if i == 2:
-    #         break
-    #     x = input.cpu().numpy()
-    #     y = target.cpu().numpy()
-    #     #print(y)
-    #     for j, xx in enumerate(x):
-    #         img = Image.fromarray(xx[0]*255).convert('L')
-    #         img.save('/usr/xtmp/zhichen/attention-module/plot/train'+str(i)+str(j)+'_'+str(y[j])+'.png')
-
-    # for i, (input, target) in enumerate(val_loader):
-    #     if i == 2:
-    #         break
-    #     x = input.cpu().numpy()
-    #     y = target.cpu().numpy()
-    #     for j, xx in enumerate(x):
-    #         img = Image.fromarray(xx[0]*255).convert('L')
-    #         img.save('/usr/xtmp/zhichen/attention-module/plot/val'+str(i)+str(j)+'_'+str(y[j])+'.png')
-
-    for epoch in range(args.start_epoch, args.start_epoch + 5):
+    for epoch in range(args.start_epoch, args.start_epoch + 3):
     #for epoch in range(args.start_epoch, args.epochs):
         
         adjust_learning_rate(optimizer, epoch)
@@ -270,7 +227,10 @@ def main():
             'best_prec1': best_prec1,
             'optimizer' : optimizer.state_dict(),
         }, is_best, args.prefix)
-    print_concept_top5(val_loader_2, model, args.whitened_layers)
+    # print_concept_top5(val_loader_2, model, args.whitened_layers)
+    plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','bed'])
+    plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','person'])
+    plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['bed','person'])
 
 def get_optimal_direction(concept_loader, model, whitened_layers):
     n = 0
@@ -456,7 +416,7 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
         #print(size_X)
         X_hat = X_hat.view(*size_X)
 
-        outputs.append(X_hat)
+        outputs.append(X_hat.cpu().numpy())
     
     for layer in layer_list:
         layer = int(layer)
@@ -493,7 +453,7 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
                 model(input_var)
                 val = []
                 for output in outputs:
-                    val = np.concatenate((val,output.sum((2,3))[:,k].cpu().numpy()))
+                    val = np.concatenate((val,output.sum((2,3))[:,k]))
                 val = val.reshape((len(outputs),-1))
                 if i == 0:
                     vals = val
@@ -534,7 +494,94 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
 
     return 0
 
+def plot_concept_representation(val_loader, model, whitened_layers, plot_cpt = ['airplane','bed']):    
+    with torch.no_grad():
+        dst = '/usr/xtmp/zhichen/attention-module/plot2/representation/'
+        
+        model.eval()
+        model = model.module
+        layers = model.layers
+        layer_list = whitened_layers.split(',')
+        dst = dst + '_'.join(layer_list) + '/'
+        if args.arch == "resnet_transfer":
+            model = model.model
+        if not os.path.exists(dst):
+            os.mkdir(dst)
+        outputs= []
+    
+        def hook(module, input, output):
+            from MODELS.iterative_normalization import iterative_normalization_py
+            #print(input)
+            X_hat = iterative_normalization_py.apply(input[0], module.running_mean, module.running_wm, module.num_channels, module.T,
+                                                    module.eps, module.momentum, module.training)
+            size_X = X_hat.size()
+            size_R = module.running_rot.size()
+            X_hat = X_hat.view(size_X[0], size_R[0], size_R[2], *size_X[2:])
 
+            X_hat = torch.einsum('bgchw,gdc->bgdhw', X_hat, module.running_rot)
+            #print(size_X)
+            X_hat = X_hat.view(*size_X)
+
+            outputs.append(X_hat.cpu().numpy())
+            
+        for layer in layer_list:
+            layer = int(layer)
+            if layer <= layers[0]:
+                model.layer1[layer-1].bn1.register_forward_hook(hook)
+            elif layer <= layers[0] + layers[1]:
+                model.layer2[layer-layers[0]-1].bn1.register_forward_hook(hook)
+            elif layer <= layers[0] + layers[1] + layers[2]:
+                model.layer3[layer-layers[0]-layers[1]-1].bn1.register_forward_hook(hook)
+            elif layer <= layers[0] + layers[1] + layers[2] + layers[3]:
+                model.layer4[layer-layers[0]-layers[1]-layers[2]-1].bn1.register_forward_hook(hook)
+
+        concepts = args.concepts.split(',')
+        cpt_idx = [concepts.index(plot_cpt[0]),concepts.index(plot_cpt[1])]
+
+
+        paths = []
+        vals = None
+        for i, (input, _, path) in enumerate(val_loader):
+            paths += list(path)
+            input_var = torch.autograd.Variable(input).cuda()
+            outputs = []
+            model(input_var)
+            val = []
+            for output in outputs:
+                val.append(output.sum((2,3))[:,cpt_idx])
+            val = np.array(val)
+            if i == 0:
+                vals = val
+            else:
+                vals = np.concatenate((vals,val),1)
+        
+        for l, layer in enumerate(layer_list):
+            n_grid = 20
+            img_size = 100
+            img_merge = np.zeros((img_size*n_grid,img_size*n_grid,3))
+            idx_merge = -np.ones((n_grid+1,n_grid+1))
+            arr = vals[l,:]
+            for j in range(len(paths)):
+                index = np.floor((arr[j,:]-arr.min(0))/(arr.max(0)-arr.min(0))*n_grid).astype(np.int32)
+                idx_merge[index[0],index[1]] = j
+
+            for i in range(n_grid):
+                for j in range(n_grid):
+                    index = idx_merge[i,j].astype(np.int32)
+                    if index >= 0:
+                        path = paths[index]
+                        I = Image.open(path).resize((img_size,img_size),Image.ANTIALIAS)
+                        img_merge[i*img_size:(i+1)*img_size, j*img_size:(j+1)*img_size,:] = np.asarray(I)
+            plt.imshow(img_merge.astype(np.int32))
+            plt.xlabel(plot_cpt[1])
+            plt.ylabel(plot_cpt[0])
+            plt.savefig(dst+'layer'+layer+'_'+'_'.join(plot_cpt)+'.jpg',dpi=img_size*n_grid)
+    
+    return 0
+
+                    
+
+    
 def get_channel_attention_matrix(data, model, layer_idx, block_idx):
     resnet = model._modules['module']
     x = data
@@ -595,7 +642,7 @@ class AverageMeter(object):
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = args.lr * (0.1 ** (epoch // 50))
+    lr = args.lr * (0.1 ** (epoch // 10))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
