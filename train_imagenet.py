@@ -203,10 +203,10 @@ def main():
             transforms.ToTensor(),
             normalize,
         ])),
-        batch_size=args.batch_size, shuffle=False,
+        batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
 
-    for epoch in range(args.start_epoch, args.start_epoch + 3):
+    for epoch in range(args.start_epoch, args.start_epoch + 0):
     #for epoch in range(args.start_epoch, args.epochs):
         
         adjust_learning_rate(optimizer, epoch)
@@ -227,10 +227,11 @@ def main():
             'best_prec1': best_prec1,
             'optimizer' : optimizer.state_dict(),
         }, is_best, args.prefix)
-    # print_concept_top5(val_loader_2, model, args.whitened_layers)
-    plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','bed'])
-    plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','person'])
-    plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['bed','person'])
+    #print_concept_top5(val_loader_2, model, args.whitened_layers)
+    #plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','bed'])
+    #plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','person'])
+    #plot_concept_representation(val_loader_2, model, args.whitened_layers, plot_cpt = ['bed','person'])
+    plot_trajectory(val_loader_2, model, args.whitened_layers, plot_cpt = ['airplane','bed'])
 
 def get_optimal_direction(concept_loader, model, whitened_layers):
     n = 0
@@ -282,7 +283,7 @@ def train(train_loader, concept_loaders, model, criterion, optimizer, epoch):
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
-        if (i + 1) % 2 == 0:
+        if (i + 1) % 8 == 0:
             model.eval()
             with torch.no_grad():
                 for concept_index, concept_loader in enumerate(concept_loaders):
@@ -494,6 +495,95 @@ def print_concept_top5(val_loader, model, whitened_layers, print_other = False):
 
     return 0
 
+def plot_trajectory(val_loader, model, whitened_layers, plot_cpt = ['airplane','bed']):
+    with torch.no_grad():        
+        model.eval()
+        model = model.module
+        layers = model.layers
+        layer_list = whitened_layers.split(',')
+        if args.arch == "resnet_transfer":
+            model = model.model
+        outputs= []
+    
+        def hook(module, input, output):
+            from MODELS.iterative_normalization import iterative_normalization_py
+            #print(input)
+            X_hat = iterative_normalization_py.apply(input[0], module.running_mean, module.running_wm, module.num_channels, module.T,
+                                                    module.eps, module.momentum, module.training)
+            size_X = X_hat.size()
+            size_R = module.running_rot.size()
+            X_hat = X_hat.view(size_X[0], size_R[0], size_R[2], *size_X[2:])
+
+            X_hat = torch.einsum('bgchw,gdc->bgdhw', X_hat, module.running_rot)
+            #print(size_X)
+            X_hat = X_hat.view(*size_X)
+
+            outputs.append(X_hat.cpu().numpy())
+            
+        for layer in layer_list:
+            layer = int(layer)
+            if layer <= layers[0]:
+                model.layer1[layer-1].bn1.register_forward_hook(hook)
+            elif layer <= layers[0] + layers[1]:
+                model.layer2[layer-layers[0]-1].bn1.register_forward_hook(hook)
+            elif layer <= layers[0] + layers[1] + layers[2]:
+                model.layer3[layer-layers[0]-layers[1]-1].bn1.register_forward_hook(hook)
+            elif layer <= layers[0] + layers[1] + layers[2] + layers[3]:
+                model.layer4[layer-layers[0]-layers[1]-layers[2]-1].bn1.register_forward_hook(hook)
+
+        concepts = args.concepts.split(',')
+        cpt_idx = [concepts.index(plot_cpt[0]),concepts.index(plot_cpt[1])]
+
+
+        paths = []
+        vals = None
+        for i, (input, _, path) in enumerate(val_loader):
+            paths += list(path)
+            input_var = torch.autograd.Variable(input).cuda()
+            outputs = []
+            model(input_var)
+            val = []
+            for output in outputs:
+                val.append(output.sum((2,3))[:,cpt_idx])
+            val = np.array(val)
+            if i == 0:
+                vals = val
+            else:
+                vals = np.concatenate((vals,val),1)
+        
+        try:
+            os.mkdir('/usr/xtmp/zhichen/attention-module/plot2/trajectory/{}'.format('_'.join(plot_cpt)))
+        except:
+            pass
+
+        num_examples = vals.shape[1]
+        num_layers = vals.shape[0]
+        max_vals = np.amax(vals, axis=1)
+        min_vals = np.amin(vals, axis=1)
+        vals = vals.transpose((1,0,2))
+        # vals = (vals - min_vals)/(max_vals-min_vals)
+        sort_idx = vals.argsort(0)
+        for i in range(num_layers):
+            for j in range(2):
+                vals[sort_idx[:,i,j],i,j] = np.arange(num_examples)/num_examples
+        for i in range(num_examples):
+            print(i)
+            if i==100:
+                break
+            fig = plt.figure(figsize=(10,5))
+            plt.subplot(1,2,2)
+            plt.scatter(vals[i,:,0],vals[i,:,1])
+            start_x = vals[i,0,0]
+            start_y = vals[i,0,1]
+            for j in range(1, num_layers):
+                dx, dy = vals[i,j,0]-vals[i,j-1,0],vals[i,j,1]-vals[i,j-1,1]
+                plt.arrow(start_x, start_y, dx, dy, length_includes_head=True, head_width=0.01, head_length=0.02)
+                start_x, start_y = vals[i,j,0], vals[i,j,1]
+            plt.subplot(1,2,1)
+            I = Image.open(paths[i]).resize((100,100),Image.ANTIALIAS)
+            plt.imshow(np.asarray(I).astype(np.int32))
+            plt.savefig('/usr/xtmp/zhichen/attention-module/plot2/trajectory/{}/{}.jpg'.format('_'.join(plot_cpt), i))
+            
 def plot_concept_representation(val_loader, model, whitened_layers, plot_cpt = ['airplane','bed']):    
     with torch.no_grad():
         dst = '/usr/xtmp/zhichen/attention-module/plot2/representation/'

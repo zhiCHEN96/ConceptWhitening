@@ -1,1 +1,1 @@
-python3 ../train_imagenet.py --ngpu 1 --workers 16 --arch resnet_transfer --depth 18 --epochs 200 --batch-size 64 --lr 0.001 --whitened_layers 8 --concepts airplane,bed,person --prefix RESNET18_PLACES_CPT_WHITEN_TRANSFER /usr/xtmp/zhichen/image_data_new/scene/
+python3 ../train_imagenet.py --ngpu 1 --workers 16 --arch resnet_transfer --depth 18 --epochs 200 --batch-size 64 --lr 0.001 --whitened_layers 1,2,3,4,5,6,7,8 --concepts airplane,bed,person --prefix RESNET18_PLACES_CPT_WHITEN_TRANSFER /usr/xtmp/zhichen/image_data_new/scene/
