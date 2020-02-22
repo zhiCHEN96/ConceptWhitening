@@ -5,6 +5,7 @@ Reference:  Iterative Normalization: Beyond Standardization towards Efficient Wh
 - Code: https://github.com/huangleiBuaa/IterNorm
 """
 import torch.nn
+import torch.nn.functional as F
 from torch.nn import Parameter
 
 # import extension._bcnn as bcnn
@@ -153,8 +154,8 @@ class IterNorm(torch.nn.Module):
 
 
 class IterNormRotation(torch.nn.Module):
-    def __init__(self, num_features, num_groups=1, num_channels=None, T=5, dim=4, tau=1e-4, eps=1e-5, momentum=0.1, affine=True,
-                mode = -1, *args, **kwargs):
+    def __init__(self, num_features, num_groups=1, num_channels=None, T=5, dim=4, tau=1e-4, eps=1e-5, momentum=0.05, affine=False,
+                mode = -1, num_selected_concept = 3, activation_mode='pool_max', *args, **kwargs):
         super(IterNormRotation, self).__init__()
         # assert dim == 4, 'IterNorm is not support 2D'
         self.T = T
@@ -165,6 +166,8 @@ class IterNormRotation(torch.nn.Module):
         self.affine = affine
         self.dim = dim
         self.mode = mode
+        self.k = num_selected_concept
+        self.activation_mode = activation_mode
         if num_channels is None:
             num_channels = (num_features - 1) // num_groups + 1
         num_groups = num_features // num_channels
@@ -177,12 +180,16 @@ class IterNormRotation(torch.nn.Module):
         self.num_channels = num_channels
         shape = [1] * dim
         shape[1] = self.num_features
-        if self.affine:
-            self.weight = Parameter(torch.Tensor(*shape))
-            self.bias = Parameter(torch.Tensor(*shape))
-        else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+        #if self.affine:
+        self.weight = Parameter(torch.Tensor(*shape))
+        self.bias = Parameter(torch.Tensor(*shape))
+        #else:
+        #    self.register_parameter('weight', None)
+        #    self.register_parameter('bias', None)
+
+        #pooling and unpooling used in gradient computation
+        self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=3, return_indices=True)
+        self.maxunpool = torch.nn.MaxUnpool2d(kernel_size=3, stride=3)
 
         self.register_buffer('running_mean', torch.zeros(num_groups, num_channels, 1))
         # running whiten matrix
@@ -233,12 +240,12 @@ class IterNormRotation(torch.nn.Module):
                         tau = (beta+alpha)/2
                     else:
                         break
-                #print(tau, F_Y_tau)
+                print(tau, F_Y_tau)
                 Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
                 R = torch.bmm(Q, R)
             
             self.running_rot = R #self.momentum * R + (1. - self.momentum) * self.running_rot
-            self.sum_G = torch.zeros(*size_R).cuda()
+            #self.sum_G = torch.zeros(*size_R).cuda()
             self.counter = (torch.ones(size_R[-1]) * 0.001).cuda()
 
 
@@ -247,14 +254,52 @@ class IterNormRotation(torch.nn.Module):
                                                  self.eps, self.momentum, self.training)
         # print(X_hat.shape, self.running_rot.shape)
         # affine
+        # nchw
         size_X = X_hat.size()
         size_R = self.running_rot.size()
+        # ngchw
         X_hat = X_hat.view(size_X[0], size_R[0], size_R[2], *size_X[2:])
-        # updating the rotation matrix, using the concept dataset
-        if self.mode>=0:
-            with torch.no_grad():
-                self.sum_G[:,self.mode,:] = -X_hat.mean((0,3,4))
-                self.counter[self.mode] += 1
+        # updating the gradient matrix, using the concept dataset
+        with torch.no_grad():
+            if self.mode>=0 and self.mode<self.k:
+                if self.activation_mode=='mean':
+                    #self.sum_G[:,self.mode,:] += -X_hat.mean((0,3,4))
+                    self.sum_G[:,self.mode,:] = self.momentum * -X_hat.mean((0,3,4)) + (1. - self.momentum) * self.sum_G[:,self.mode,:]
+                    self.counter[self.mode] += 1
+                elif self.activation_mode=='max':
+                    X_test = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
+                    max_values = torch.max(torch.max(X_test, 3, keepdim=True)[0], 4, keepdim=True)[0]
+                    max_bool = max_values==X_test
+                    grad = -((X_hat * max_bool.to(X_hat)).sum((3,4))/max_bool.to(X_hat).sum((3,4))).mean((0,))
+                    self.sum_G[:,self.mode,:] = self.momentum * grad + (1. - self.momentum) * self.sum_G[:,self.mode,:]
+                    self.counter[self.mode] += 1
+                elif self.activation_mode=='pos_mean':
+                    X_test = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
+                    pos_bool = X_test > 0
+                    grad = -((X_hat * pos_bool.to(X_hat)).sum((3,4))/(pos_bool.to(X_hat).sum((3,4))+0.0001)).mean((0,))
+                    self.sum_G[:,self.mode,:] = self.momentum * grad + (1. - self.momentum) * self.sum_G[:,self.mode,:]
+                    self.counter[self.mode] += 1
+                elif self.activation_mode=='pool_max':
+                    X_test = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
+                    X_test_nchw = X_test.view(size_X)
+                    maxpool_value, maxpool_indices = self.maxpool(X_test_nchw)
+                    # print(maxpool_indices.shape)
+                    # print(size_X,size_R)
+                    X_test_unpool = self.maxunpool(maxpool_value, maxpool_indices, output_size = size_X).view(size_X[0], size_R[0], size_R[2], *size_X[2:])
+                    maxpool_bool = X_test == X_test_unpool
+                    grad = -((X_hat * maxpool_bool.to(X_hat)).sum((3,4))/(maxpool_bool.to(X_hat).sum((3,4)))).mean((0,))
+                    self.sum_G[:,self.mode,:] = self.momentum * grad + (1. - self.momentum) * self.sum_G[:,self.mode,:]
+                    self.counter[self.mode] += 1
+
+            elif self.mode>=0 and self.mode>=self.k:
+                X_dot = torch.einsum('ngchw,gdc->ngdhw', X_hat, self.running_rot)
+                X_dot = (X_dot == torch.max(X_dot, dim=2,keepdim=True)[0]).float().cuda()
+                X_dot_unity = torch.clamp(torch.ceil(X_dot), 0.0, 1.0)
+                X_G = torch.einsum('ngchw,ngdhw->gdchw', X_hat, X_dot_unity).mean((3,4))
+                X_G[:,:self.k,:] = 0.0
+                self.sum_G[:,:,:] += -X_G/size_X[0]
+                self.counter[self.k:] += 1
+
 
         X_hat = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
         #print(size_X)
