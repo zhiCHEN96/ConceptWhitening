@@ -29,15 +29,16 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+parser = argparse.ArgumentParser(description='PyTorch Places365 Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet',
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
-parser.add_argument('--whitened_layers', default='1,2,3')
-parser.add_argument('--depth', default=50, type=int, metavar='D',
+parser.add_argument('--whitened_layers', default='8')
+parser.add_argument('--act_mode', default='pool_max')
+parser.add_argument('--depth', default=18, type=int, metavar='D',
                     help='model depth')
 parser.add_argument('--ngpu', default=4, type=int, metavar='G',
                     help='number of gpus to use')
@@ -47,7 +48,7 @@ parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
@@ -63,7 +64,6 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
 parser.add_argument("--seed", type=int, default=1234, metavar='BS', help='input batch size for training (default: 64)')
 parser.add_argument("--prefix", type=str, required=True, metavar='PFX', help='prefix for logging & checkpoint saving')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='evaluation only')
-parser.add_argument('--att-type', type=str, choices=['BAM', 'CBAM'], default='CBAM')
 best_prec1 = 0
 
 if not os.path.exists('./checkpoints'):
@@ -119,10 +119,7 @@ def main():
     args.prefix += '_'+'_'.join(args.whitened_layers.split(','))
 
     #create model
-    if args.arch == "resnet":
-        model = ResidualNet( 'ImageNet', args.depth, 9, None, [int(x) for x in args.whitened_layers.split(',')])
-    elif args.arch == "resnet_transfer":
-        # model = ResidualNetTransfer(9, [int(x) for x in args.whitened_layers.split(',')], model_file ='./checkpoints/RESNET18_PLACES_VANILLA_model_best.pth.tar')
+    if args.arch == "resnet_cw":
         if args.depth == 50:
             model = ResidualNetTransfer(365, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'resnet50', layers = [3, 4, 6, 3], model_file='resnet50_places365.pth.tar')
         elif args.depth == 18:
@@ -132,28 +129,24 @@ def main():
             model = ResidualNetBN(365, args, arch = 'resnet50', layers = [3, 4, 6, 3], model_file='resnet50_places365.pth.tar')
         if args.depth == 18:
             model = ResidualNetBN(365, args, arch = 'resnet18', layers = [2, 2, 2, 2], model_file='resnet18_places365.pth.tar')
-    elif args.arch == "densenet_transfer":
+    elif args.arch == "densenet_cw":
         model = DenseNetTransfer(365, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'densenet161', model_file='densenet161_places365.pth.tar')
     elif args.arch == 'densenet_original':
         model = DenseNetBN(365, args, arch = 'densenet161', model_file='densenet161_places365.pth.tar')
-    elif args.arch == "vgg16_bn_transfer":
+    elif args.arch == "vgg16_cw":
         model = VGGBNTransfer(365, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'vgg16_bn', model_file='./checkpoints/vgg16_bn_places365_12_model_best.pth.tar')
     elif args.arch == "vgg16_bn_original":
         model = VGGBN(365, args, arch = 'vgg16_bn', model_file = './checkpoints/vgg16_bn_places365_12_model_best.pth.tar') #'vgg16_bn_places365.pt')
-    # define loss function (criterion) and optimizer
-    print(args.start_epoch, args.best_prec1)
+    
+    # print(args.start_epoch, args.best_prec1)
     best_prec1 = 0#args.best_prec1
+    
+    # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
     # param_list = get_param_list_bn(model)
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                            momentum=args.momentum,
                            weight_decay=args.weight_decay)
-    # optimizer = torch.optim.SGD(param_list, args.lr,
-    #                         momentum=args.momentum,
-    #                         weight_decay=args.weight_decay)
-
-    # optimizer = torch.optim.Adam(model.parameters(), lr = args.lr,
-    #                         weight_decay=args.weight_decay)
                             
     model = torch.nn.DataParallel(model, device_ids=list(range(args.ngpu)))
     #model = torch.nn.DataParallel(model).cuda()
@@ -191,8 +184,6 @@ def main():
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
 
-    # import pdb
-    # pdb.set_trace()
     train_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(traindir, transforms.Compose([
             transforms.RandomSizedCrop(224),

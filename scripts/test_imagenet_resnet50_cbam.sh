@@ -1,1 +1,0 @@
-python3 ../train_imagenet.py --ngpu 1 --workers 20 --arch resnet --depth 50 --att-type CBAM --prefix EVAL --batch-size 16 --resume ./checkpoints/RESNET50_CBAM_new_name_wrap.pth --evaluate /usr/xtmp/zhichen/image_data/object/

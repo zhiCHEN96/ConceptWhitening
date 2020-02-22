@@ -1,1 +1,1 @@
-python3 ../train_imagenet.py --ngpu 1 --workers 8 --arch resnet --depth 18 --whitened_layers 1,8 --concepts airplane,bed,person --prefix EVAL --batch-size 32 --resume ./checkpoints/RESNET18_PLACES_CPT_WHITEN_model_best.pth.tar --evaluate /usr/xtmp/zhichen/image_data_new/scene
+python3 ../train_places.py --ngpu 1 --workers 8 --arch resnet --depth 18 --whitened_layers 1,8 --concepts airplane,bed,person --prefix EVAL --batch-size 32 --resume ./checkpoints/RESNET18_PLACES_CPT_WHITEN_model_best.pth.tar --evaluate /usr/xtmp/zhichen/image_data_new/scene
