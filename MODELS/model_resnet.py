@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,31 +8,21 @@ from torch.nn import init
 from .iterative_normalization import IterNormRotation as cw_layer
 
 class ResidualNetTransfer(nn.Module):
-    def __init__(self, num_classes, args, whitened_layers=None, arch = 'resnet18', layers = [2,2,2,2], model_file='resnet18_places365.pth.tar'):
+    def __init__(self, num_classes, args, whitened_layers=None, arch = 'resnet18', layers = [2,2,2,2], model_file = None):
 
         super(ResidualNetTransfer, self).__init__()
         self.layers = layers
         self.model = models.__dict__[arch](num_classes=num_classes)
-        #from functools import partial
-        #import pickle
-        #import os
-        #pickle.load = partial(pickle.load, encoding="latin1")
-        #pickle.Unpickler = partial(pickle.Unpickler, encoding="latin1")
-        #if not os.path.exists(model_file):
-        #     weight_url = 'http://places2.csail.mit.edu/models_places365/' + model_file
-        #     os.system('wget ' + weight_url)
-        # checkpoint = torch.load(model_file, map_location=lambda storage, loc: storage)
-        checkpoint = torch.load(model_file)
-        #print(checkpoint['epoch'], checkpoint['best_prec1'])
-        args.start_epoch = checkpoint['epoch']
-        args.best_prec1 = checkpoint['best_prec1']
-        print(checkpoint['best_prec1'])
-        state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
-        state_dict = {str.replace(k,'bw','bn'): v for k,v in state_dict.items()}
-        self.model.load_state_dict(state_dict)
-        #self.model.load_state_dict(state_dict)
-
-        #self.model.fc = nn.Linear(512, num_classes)
+        if model_file != None:
+            if not os.path.exists(model_file):
+                raise Exception("checkpoint {} not found!".format(model_file))
+            checkpoint = torch.load(model_file)
+            args.start_epoch = checkpoint['epoch']
+            args.best_prec1 = checkpoint['best_prec1']
+            #print(checkpoint['best_prec1'])
+            state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
+            state_dict = {str.replace(k,'bw','bn'): v for k,v in state_dict.items()}
+            self.model.load_state_dict(state_dict)
 
         self.whitened_layers = whitened_layers
 
@@ -46,6 +37,11 @@ class ResidualNetTransfer(nn.Module):
                 self.model.layer4[whitened_layer-layers[0]-layers[1]-layers[2]-1].bn1 = cw_layer(512, activation_mode = args.act_mode)
     
     def change_mode(self, mode):
+        """
+        Change the training mode
+        mode = -1, no update for gradient matrix G
+             = 0 to k-1, the column index of gradient matrix G that needs to be updated
+        """
         layers = self.layers
         for whitened_layer in self.whitened_layers:
             if whitened_layer <= layers[0]:
@@ -58,6 +54,9 @@ class ResidualNetTransfer(nn.Module):
                 self.model.layer4[whitened_layer-layers[0]-layers[1]-layers[2]-1].bn1.mode = mode
     
     def update_rotation_matrix(self):
+        """
+        update the rotation R using accumulated gradient G
+        """
         layers = self.layers
         for whitened_layer in self.whitened_layers:
             if whitened_layer <= layers[0]:
@@ -73,18 +72,19 @@ class ResidualNetTransfer(nn.Module):
         return self.model(x)
 
 class DenseNetTransfer(nn.Module):
-    def __init__(self, num_classes, args, whitened_layers=None, arch = 'densenet161', model_file='densenet161_places365.pth.tar'):
+    def __init__(self, num_classes, args, whitened_layers=None, arch = 'densenet161', model_file=None):
 
         super(DenseNetTransfer, self).__init__()
         self.model = models.__dict__[arch](num_classes=num_classes)
-        checkpoint = torch.load(model_file)
-        args.start_epoch = checkpoint['epoch']
-        args.best_prec1 = checkpoint['best_prec1']
-        import re
-        def repl(matchobj):
-            return matchobj.group(0)[1:]
-        state_dict = {re.sub('\.\d+\.',repl,str.replace(k,'module.','')): v for k,v in checkpoint['state_dict'].items()}
-        self.model.load_state_dict(state_dict)
+        if model_file != None:
+            checkpoint = torch.load(model_file)
+            args.start_epoch = checkpoint['epoch']
+            args.best_prec1 = checkpoint['best_prec1']
+            import re
+            def repl(matchobj):
+                return matchobj.group(0)[1:]
+            state_dict = {re.sub('\.\d+\.',repl,str.replace(k,'module.','')): v for k,v in checkpoint['state_dict'].items()}
+            self.model.load_state_dict(state_dict)
 
         self.whitened_layers = whitened_layers
         for whitened_layer in whitened_layers:
@@ -100,6 +100,11 @@ class DenseNetTransfer(nn.Module):
                 self.model.features.norm5 = cw_layer(2208, activation_mode = args.act_mode)
     
     def change_mode(self, mode):
+        """
+        Change the training mode
+        mode = -1, no update for gradient matrix G
+             = 0 to k-1, the column index of gradient matrix G that needs to be updated
+        """
         for whitened_layer in self.whitened_layers:
             if whitened_layer == 1:
                 self.model.features.norm0.mode = mode
@@ -113,6 +118,9 @@ class DenseNetTransfer(nn.Module):
                 self.model.features.norm5.mode = mode
     
     def update_rotation_matrix(self):
+        """
+        update the rotation R using accumulated gradient G
+        """
         for whitened_layer in self.whitened_layers:
             if whitened_layer == 1:
                 self.model.features.norm0.update_rotation_matrix()
@@ -129,14 +137,15 @@ class DenseNetTransfer(nn.Module):
         return self.model(x)
 
 class VGGBNTransfer(nn.Module):
-    def __init__(self, num_classes, args, whitened_layers=None, arch = 'vgg16_bn', model_file='./checkpoints/vgg16_bn_places365.pth.tar'):
+    def __init__(self, num_classes, args, whitened_layers=None, arch = 'vgg16_bn', model_file = None):
         super(VGGBNTransfer, self).__init__()
         self.model = models.__dict__[arch](num_classes=num_classes)
-        checkpoint = torch.load(model_file)
-        args.start_epoch = 115#checkpoint['epoch']
-        args.best_prec1 = checkpoint['best_prec1']
-        state_dict = {str.replace(k,'module.model.',''): v for k,v in checkpoint['state_dict'].items()}
-        self.model.load_state_dict(state_dict)
+        if model_file != None:
+            checkpoint = torch.load(model_file)
+            args.start_epoch = checkpoint['epoch']
+            args.best_prec1 = checkpoint['best_prec1']
+            state_dict = {str.replace(k,'module.model.',''): v for k,v in checkpoint['state_dict'].items()}
+            self.model.load_state_dict(state_dict)
 
         self.whitened_layers = whitened_layers
         self.layers = [1,4,8,11,15,18,21,25,28,31,35,38,41]
@@ -153,11 +162,19 @@ class VGGBNTransfer(nn.Module):
             self.model.features[self.layers[whitened_layer]] = cw_layer(channel, activation_mode = args.act_mode)
 
     def change_mode(self, mode):
+        """
+        Change the training mode
+        mode = -1, no update for gradient matrix G
+             = 0 to k-1, the column index of gradient matrix G that needs to be updated
+        """
         layers = self.layers
         for whitened_layer in self.whitened_layers:
             self.model.features[layers[whitened_layer-1]].mode = mode
     
     def update_rotation_matrix(self):
+        """
+        update the rotation R using accumulated gradient G
+        """
         layers = self.layers
         for whitened_layer in self.whitened_layers:
             self.model.features[layers[whitened_layer-1]].update_rotation_matrix()
@@ -166,45 +183,49 @@ class VGGBNTransfer(nn.Module):
         return self.model(x)
 
 class ResidualNetBN(nn.Module):
-    def __init__(self, num_classes, args, arch = 'resnet18', layers = [2,2,2,2], model_file='resnet18_places365.pth.tar'):
+    def __init__(self, num_classes, args, arch = 'resnet18', layers = [2,2,2,2], model_file = None):
 
         super(ResidualNetBN, self).__init__()
         self.layers = layers
         self.model = models.__dict__[arch](num_classes=num_classes)
-        checkpoint = torch.load(model_file)
-        args.start_epoch = checkpoint['epoch']
-        args.best_prec1 = checkpoint['best_prec1']
-        print(checkpoint.keys())
-        state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
-        self.model.load_state_dict(state_dict)
+        if model_file != None:
+            if not os.path.exists(model_file):
+                raise Exception("checkpoint {} not found!".format(model_file))
+            checkpoint = torch.load(model_file)
+            args.start_epoch = checkpoint['epoch']
+            args.best_prec1 = checkpoint['best_prec1']
+            #print(checkpoint.keys())
+            state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
+            self.model.load_state_dict(state_dict)
 
     def forward(self, x):
         return self.model(x)
 
 class DenseNetBN(nn.Module):
-    def __init__(self, num_classes, args, arch = 'densenet161', model_file='densenet161_places365.pth.tar'):
+    def __init__(self, num_classes, args, arch = 'densenet161', model_file = None):
         super(DenseNetBN, self).__init__()
         self.model = models.__dict__[arch](num_classes=num_classes)
-        checkpoint = torch.load(model_file)
-        args.start_epoch = checkpoint['epoch']
-        args.best_prec1 = checkpoint['best_prec1']
-        import re
-        def repl(matchobj):
-            return matchobj.group(0)[1:]
-        state_dict = {re.sub('\.\d+\.',repl,str.replace(k,'module.','')): v for k,v in checkpoint['state_dict'].items()}
-        self.model.load_state_dict(state_dict)
+        if model_file != None:
+            checkpoint = torch.load(model_file)
+            args.start_epoch = checkpoint['epoch']
+            args.best_prec1 = checkpoint['best_prec1']
+            import re
+            def repl(matchobj):
+                return matchobj.group(0)[1:]
+            state_dict = {re.sub('\.\d+\.',repl,str.replace(k,'module.','')): v for k,v in checkpoint['state_dict'].items()}
+            self.model.load_state_dict(state_dict)
 
     def forward(self, x):
         return self.model(x)
 
 class VGGBN(nn.Module):
-    def __init__(self, num_classes, args, arch = 'vgg16_bn', model_file=None):
+    def __init__(self, num_classes, args, arch = 'vgg16_bn', model_file = None):
         super(VGGBN, self).__init__()
         self.model = models.__dict__[arch](num_classes = 365)
         if model_file == 'vgg16_bn_places365.pt':
             state_dict = torch.load(model_file)
             args.start_epoch = 0
-            args.best_prec1 = 40
+            args.best_prec1 = 0
             d = self.model.state_dict()
             new_state_dict = {k: state_dict[k] if k in state_dict.keys() else d[k] for k in d.keys()}
             self.model.load_state_dict(new_state_dict)

@@ -12,22 +12,6 @@ from torch.nn import Parameter
 
 __all__ = ['iterative_normalization', 'IterNorm']
 
-
-#
-# class iterative_normalization(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, *inputs):
-#         result = bcnn.iterative_normalization_forward(*inputs)
-#         ctx.save_for_backward(*result[:-1])
-#         return result[-1]
-#
-#     @staticmethod
-#     def backward(ctx, *grad_outputs):
-#         grad, = grad_outputs
-#         grad_input = bcnn.iterative_normalization_backward(grad, ctx.saved_variables)
-#         return grad_input, None, None, None, None, None, None, None
-
-
 class iterative_normalization_py(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *args, **kwargs):
@@ -154,20 +138,33 @@ class IterNorm(torch.nn.Module):
 
 
 class IterNormRotation(torch.nn.Module):
-    def __init__(self, num_features, num_groups=1, num_channels=None, T=5, dim=4, tau=1e-4, eps=1e-5, momentum=0.05, affine=False,
+    """
+    Concept Whitening Module
+
+    The Whitening part is adapted from IterNorm. The core of CW module is learning 
+    an extra rotation matrix R that align target concepts with the output feature 
+    maps.
+    
+    Because the concept activation is calculated based on a feature map, which
+    is a matrix, there are multiple ways to calculate the activation, denoted
+    by activation_mode.
+
+    """
+    def __init__(self, num_features, num_groups = 1, num_channels=None, T=5, dim=4, eps=1e-5, momentum=0.05, affine=False,
                 mode = -1, num_selected_concept = 3, activation_mode='pool_max', *args, **kwargs):
         super(IterNormRotation, self).__init__()
-        # assert dim == 4, 'IterNorm is not support 2D'
+        assert dim == 4, 'IterNormRotation does not support 2D'
         self.T = T
         self.eps = eps
         self.momentum = momentum
         self.num_features = num_features
-        self.tau = tau
         self.affine = affine
         self.dim = dim
         self.mode = mode
         self.k = num_selected_concept
         self.activation_mode = activation_mode
+
+        assert num_groups == 1, 'Please keep num_groups = 1. Current version does not support group whitening.'
         if num_channels is None:
             num_channels = (num_features - 1) // num_groups + 1
         num_groups = num_features // num_channels
@@ -176,6 +173,7 @@ class IterNormRotation(torch.nn.Module):
             num_groups = num_features // num_channels
         assert num_groups > 0 and num_features % num_groups == 0, "num features={}, num groups={}".format(num_features,
             num_groups)
+
         self.num_groups = num_groups
         self.num_channels = num_channels
         shape = [1] * dim
@@ -184,13 +182,14 @@ class IterNormRotation(torch.nn.Module):
         self.weight = Parameter(torch.Tensor(*shape))
         self.bias = Parameter(torch.Tensor(*shape))
         #else:
-        #    self.register_parameter('weight', None)
-        #    self.register_parameter('bias', None)
+        #   self.register_parameter('weight', None)
+        #   self.register_parameter('bias', None)
 
         #pooling and unpooling used in gradient computation
         self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=3, return_indices=True)
         self.maxunpool = torch.nn.MaxUnpool2d(kernel_size=3, stride=3)
 
+        # running mean
         self.register_buffer('running_mean', torch.zeros(num_groups, num_channels, 1))
         # running whiten matrix
         self.register_buffer('running_wm', torch.eye(num_channels).expand(num_groups, num_channels, num_channels))
@@ -204,18 +203,21 @@ class IterNormRotation(torch.nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        # self.reset_running_stats()
         if self.affine:
             torch.nn.init.ones_(self.weight)
             torch.nn.init.zeros_(self.bias)
 
     def update_rotation_matrix(self):
+        """
+        Update the rotation matrix R using the accumulated gradient G.
+        The update uses Cayley transform to make sure R is always orthonormal.
+        """
         size_R = self.running_rot.size()
         with torch.no_grad():
             G = self.sum_G/self.counter.reshape(-1,1)
             R = self.running_rot.clone()
             for i in range(2):
-                tau = 1000
+                tau = 1000 # learning rate in Cayley transform
                 alpha = 0
                 beta = 100000000
                 c1 = 1e-4
@@ -224,14 +226,13 @@ class IterNormRotation(torch.nn.Module):
                 A = torch.einsum('gin,gjn->gij', G, R) - torch.einsum('gin,gjn->gij', R, G) # GR^T - RG^T
                 I = torch.eye(size_R[2]).expand(*size_R).cuda()
                 dF_0 = -0.5 * (A ** 2).sum()
+                # binary search for appropriate learning rate
                 while True:
                     Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
                     Y_tau = torch.bmm(Q, R)
                     F_X = (G[:,:,:] * R[:,:,:]).sum()
                     F_Y_tau = (G[:,:,:] * Y_tau[:,:,:]).sum()
                     dF_tau = -torch.bmm(torch.einsum('gni,gnj->gij', G, (I + 0.5 * tau * A).inverse()), torch.bmm(A,0.5*(R+Y_tau)))[0,:,:].trace()
-                    #print(F_Y_tau - F_X - c1*tau*dF_0)
-                    #print(c2*dF_0 - dF_tau)
                     if F_Y_tau > F_X + c1*tau*dF_0 + 1e-18:
                         beta = tau
                         tau = (beta+alpha)/2
@@ -240,12 +241,11 @@ class IterNormRotation(torch.nn.Module):
                         tau = (beta+alpha)/2
                     else:
                         break
-                print(tau, F_Y_tau)
+                # print(tau, F_Y_tau)
                 Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
                 R = torch.bmm(Q, R)
             
-            self.running_rot = R #self.momentum * R + (1. - self.momentum) * self.running_rot
-            #self.sum_G = torch.zeros(*size_R).cuda()
+            self.running_rot = R
             self.counter = (torch.ones(size_R[-1]) * 0.001).cuda()
 
 
@@ -253,17 +253,17 @@ class IterNormRotation(torch.nn.Module):
         X_hat = iterative_normalization_py.apply(X, self.running_mean, self.running_wm, self.num_channels, self.T,
                                                  self.eps, self.momentum, self.training)
         # print(X_hat.shape, self.running_rot.shape)
-        # affine
         # nchw
         size_X = X_hat.size()
         size_R = self.running_rot.size()
         # ngchw
         X_hat = X_hat.view(size_X[0], size_R[0], size_R[2], *size_X[2:])
         # updating the gradient matrix, using the concept dataset
+        # the gradient is accumulated with momentum to stablize the training
         with torch.no_grad():
+            # When 0<=mode=j<k, the jth column of gradient matrix is accumulated
             if self.mode>=0 and self.mode<self.k:
                 if self.activation_mode=='mean':
-                    #self.sum_G[:,self.mode,:] += -X_hat.mean((0,3,4))
                     self.sum_G[:,self.mode,:] = self.momentum * -X_hat.mean((0,3,4)) + (1. - self.momentum) * self.sum_G[:,self.mode,:]
                     self.counter[self.mode] += 1
                 elif self.activation_mode=='max':
@@ -283,14 +283,12 @@ class IterNormRotation(torch.nn.Module):
                     X_test = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
                     X_test_nchw = X_test.view(size_X)
                     maxpool_value, maxpool_indices = self.maxpool(X_test_nchw)
-                    # print(maxpool_indices.shape)
-                    # print(size_X,size_R)
                     X_test_unpool = self.maxunpool(maxpool_value, maxpool_indices, output_size = size_X).view(size_X[0], size_R[0], size_R[2], *size_X[2:])
                     maxpool_bool = X_test == X_test_unpool
                     grad = -((X_hat * maxpool_bool.to(X_hat)).sum((3,4))/(maxpool_bool.to(X_hat).sum((3,4)))).mean((0,))
                     self.sum_G[:,self.mode,:] = self.momentum * grad + (1. - self.momentum) * self.sum_G[:,self.mode,:]
                     self.counter[self.mode] += 1
-
+            # When mode > k, this is not included in the paper
             elif self.mode>=0 and self.mode>=self.k:
                 X_dot = torch.einsum('ngchw,gdc->ngdhw', X_hat, self.running_rot)
                 X_dot = (X_dot == torch.max(X_dot, dim=2,keepdim=True)[0]).float().cuda()
@@ -299,14 +297,11 @@ class IterNormRotation(torch.nn.Module):
                 X_G[:,:self.k,:] = 0.0
                 self.sum_G[:,:,:] += -X_G/size_X[0]
                 self.counter[self.k:] += 1
-
-
+        
+        # We set mode = -1 when we don't need to update G. For example, when we train for main objective
         X_hat = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
-        #print(size_X)
         X_hat = X_hat.view(*size_X)
         if self.affine:
-            #print(X_hat.size())
-            #print((X_hat * self.weight + self.bias).size())
             return X_hat * self.weight + self.bias
         else:
             return X_hat
@@ -320,7 +315,6 @@ if __name__ == '__main__':
     print(ItN)
     ItN.train()
     x = torch.randn(16, 64, 14, 14)
-    #x = torch.randn(128, 64)
     x.requires_grad_()
     y = ItN(x)
     z = y.transpose(0, 1).contiguous().view(x.size(1), -1)
