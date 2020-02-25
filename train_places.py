@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import gc
 import shutil
 import time
 import random
@@ -151,7 +152,7 @@ def main():
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
 
     concept_loaders = [
         torch.utils.data.DataLoader(
@@ -162,19 +163,19 @@ def main():
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
         for concept in args.concepts.split(',')
     ]
 
     val_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(testdir, transforms.Compose([
+        datasets.ImageFolder(valdir, transforms.Compose([
             transforms.Scale(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
     
     test_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(testdir, transforms.Compose([
@@ -184,7 +185,7 @@ def main():
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
 
     test_loader_with_path = torch.utils.data.DataLoader(
         ImageFolderWithPaths(testdir, transforms.Compose([
@@ -194,7 +195,7 @@ def main():
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
 
     if args.evaluate == False:
         print("Start training")
@@ -363,10 +364,15 @@ def plot_figures(args, model, test_loader_with_path, train_loader, concept_loade
     print("Plot AUC-concept_purity")
     aucs_cw = plot_auc_cw(args, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, activation_mode = args.act_mode)
     model = load_resnet_model(args, arch='resnet_original', depth=18)
+    print("Running AUCs svm")
     aucs_svm = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'svm')
+    print("Running AUCs lr")
     aucs_lr = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'lr')
+    print("Running AUCs best filter")
     aucs_filter = plot_auc_filter(args, model, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name)
+    print("AUC plotting")
     plot_auc(args, aucs_cw, aucs_svm, aucs_lr, aucs_filter, plot_cpt = concept_name)
+    print("End plotting")
 
 def save_checkpoint(state, is_best, prefix):
     filename='./checkpoints/%s_checkpoint.pth.tar'%prefix

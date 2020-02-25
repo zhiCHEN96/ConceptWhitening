@@ -1,2 +1,3 @@
 *.pyc
-plot*
+plot/*
+*.out

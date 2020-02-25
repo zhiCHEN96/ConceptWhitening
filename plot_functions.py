@@ -291,7 +291,7 @@ def plot_auc_cw(args, conceptdir, whitened_layers, plot_cpt = ['airplane','bed',
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
 
     layer_list = whitened_layers.split(',')
     concept_list = os.listdir(conceptdir)
@@ -407,7 +407,7 @@ def plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, whitened
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
     concept_list = os.listdir(conceptdir)
     concept_list.sort()
 
@@ -522,7 +522,7 @@ def plot_auc_filter(args, model, conceptdir, whitened_layers, plot_cpt = ['airpl
             normalize,
         ])),
         batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=args.workers, pin_memory=False)
     concept_list = os.listdir(conceptdir)
     concept_list.sort()
 
