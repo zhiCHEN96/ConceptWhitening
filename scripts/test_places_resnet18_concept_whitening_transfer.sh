@@ -1,2 +1,2 @@
 #!/bin/sh
-python3 ../train_places.py --ngpu 1 --workers 1 --arch resnet_cw --depth 18 --epochs 200 --batch-size 64 --lr 0.1 --whitened_layers 8 --concepts airplane,bed,person --prefix RESNET18_PLACES365_CPT_WHITEN_TRANSFER --resume ./checkpoints/RESNET18_PLACES365_CPT_WHITEN_TRANSFER_model_best.pth.tar /usr/xtmp/zhichen/data_256/ --evaluate
+python3 ../train_places.py --seed 1232 --ngpu 1 --workers 1 --arch resnet_cw --depth 18 --epochs 200 --batch-size 1 --lr 0.1 --whitened_layers 8 --concepts airplane,bed,bench,boat,book,horse,person --prefix RESNET18_PLACES365_CPT_WHITEN_TRANSFER --resume ./checkpoints/RESNET18_PLACES365_CPT_WHITEN_TRANSFER_model_best.pth.tar /usr/xtmp/zhichen/data_256/ --evaluate

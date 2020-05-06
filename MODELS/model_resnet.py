@@ -16,7 +16,7 @@ class ResidualNetTransfer(nn.Module):
         if model_file != None:
             if not os.path.exists(model_file):
                 raise Exception("checkpoint {} not found!".format(model_file))
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             #print(checkpoint['best_prec1'])
@@ -77,7 +77,7 @@ class DenseNetTransfer(nn.Module):
         super(DenseNetTransfer, self).__init__()
         self.model = models.__dict__[arch](num_classes=num_classes)
         if model_file != None:
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             import re
@@ -141,7 +141,7 @@ class VGGBNTransfer(nn.Module):
         super(VGGBNTransfer, self).__init__()
         self.model = models.__dict__[arch](num_classes=num_classes)
         if model_file != None:
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             state_dict = {str.replace(k,'module.model.',''): v for k,v in checkpoint['state_dict'].items()}
@@ -191,10 +191,11 @@ class ResidualNetBN(nn.Module):
         if model_file != None:
             if not os.path.exists(model_file):
                 raise Exception("checkpoint {} not found!".format(model_file))
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             #print(checkpoint.keys())
+            print(args.best_prec1)
             state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
             self.model.load_state_dict(state_dict)
 
@@ -206,7 +207,7 @@ class DenseNetBN(nn.Module):
         super(DenseNetBN, self).__init__()
         self.model = models.__dict__[arch](num_classes=num_classes)
         if model_file != None:
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             import re
@@ -223,14 +224,14 @@ class VGGBN(nn.Module):
         super(VGGBN, self).__init__()
         self.model = models.__dict__[arch](num_classes = 365)
         if model_file == 'vgg16_bn_places365.pt':
-            state_dict = torch.load(model_file)
+            state_dict = torch.load(model_file, map_location='cpu')
             args.start_epoch = 0
             args.best_prec1 = 0
             d = self.model.state_dict()
             new_state_dict = {k: state_dict[k] if k in state_dict.keys() else d[k] for k in d.keys()}
             self.model.load_state_dict(new_state_dict)
         elif model_file != None:
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             state_dict = {str.replace(k,'module.model.',''): v for k,v in checkpoint['state_dict'].items()}

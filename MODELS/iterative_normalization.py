@@ -150,8 +150,8 @@ class IterNormRotation(torch.nn.Module):
     by activation_mode.
 
     """
-    def __init__(self, num_features, num_groups = 1, num_channels=None, T=5, dim=4, eps=1e-5, momentum=0.05, affine=False,
-                mode = -1, num_selected_concept = 3, activation_mode='pool_max', *args, **kwargs):
+    def __init__(self, num_features, num_groups = 1, num_channels=None, T=10, dim=4, eps=1e-5, momentum=0.05, affine=False,
+                mode = -1, activation_mode='pool_max', *args, **kwargs):
         super(IterNormRotation, self).__init__()
         assert dim == 4, 'IterNormRotation does not support 2D'
         self.T = T
@@ -161,7 +161,6 @@ class IterNormRotation(torch.nn.Module):
         self.affine = affine
         self.dim = dim
         self.mode = mode
-        self.k = num_selected_concept
         self.activation_mode = activation_mode
 
         assert num_groups == 1, 'Please keep num_groups = 1. Current version does not support group whitening.'
@@ -227,6 +226,7 @@ class IterNormRotation(torch.nn.Module):
                 I = torch.eye(size_R[2]).expand(*size_R).cuda()
                 dF_0 = -0.5 * (A ** 2).sum()
                 # binary search for appropriate learning rate
+                cnt = 0
                 while True:
                     Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
                     Y_tau = torch.bmm(Q, R)
@@ -241,7 +241,14 @@ class IterNormRotation(torch.nn.Module):
                         tau = (beta+alpha)/2
                     else:
                         break
-                # print(tau, F_Y_tau)
+                    cnt += 1
+                    if cnt > 500:
+                        print("--------------------update fail------------------------")
+                        print(F_Y_tau, F_X + c1*tau*dF_0)
+                        print(dF_tau, c2*dF_0)
+                        print("-------------------------------------------------------")
+                        break
+                print(tau, F_Y_tau)
                 Q = torch.bmm((I + 0.5 * tau * A).inverse(), I - 0.5 * tau * A)
                 R = torch.bmm(Q, R)
             
@@ -261,8 +268,8 @@ class IterNormRotation(torch.nn.Module):
         # updating the gradient matrix, using the concept dataset
         # the gradient is accumulated with momentum to stablize the training
         with torch.no_grad():
-            # When 0<=mode=j<k, the jth column of gradient matrix is accumulated
-            if self.mode>=0 and self.mode<self.k:
+            # When 0<=mode, the jth column of gradient matrix is accumulated
+            if self.mode>=0:
                 if self.activation_mode=='mean':
                     self.sum_G[:,self.mode,:] = self.momentum * -X_hat.mean((0,3,4)) + (1. - self.momentum) * self.sum_G[:,self.mode,:]
                     self.counter[self.mode] += 1
@@ -288,15 +295,15 @@ class IterNormRotation(torch.nn.Module):
                     grad = -((X_hat * maxpool_bool.to(X_hat)).sum((3,4))/(maxpool_bool.to(X_hat).sum((3,4)))).mean((0,))
                     self.sum_G[:,self.mode,:] = self.momentum * grad + (1. - self.momentum) * self.sum_G[:,self.mode,:]
                     self.counter[self.mode] += 1
-            # When mode > k, this is not included in the paper
-            elif self.mode>=0 and self.mode>=self.k:
-                X_dot = torch.einsum('ngchw,gdc->ngdhw', X_hat, self.running_rot)
-                X_dot = (X_dot == torch.max(X_dot, dim=2,keepdim=True)[0]).float().cuda()
-                X_dot_unity = torch.clamp(torch.ceil(X_dot), 0.0, 1.0)
-                X_G = torch.einsum('ngchw,ngdhw->gdchw', X_hat, X_dot_unity).mean((3,4))
-                X_G[:,:self.k,:] = 0.0
-                self.sum_G[:,:,:] += -X_G/size_X[0]
-                self.counter[self.k:] += 1
+            # # When mode > k, this is not included in the paper
+            # elif self.mode>=0 and self.mode>=self.k:
+            #     X_dot = torch.einsum('ngchw,gdc->ngdhw', X_hat, self.running_rot)
+            #     X_dot = (X_dot == torch.max(X_dot, dim=2,keepdim=True)[0]).float().cuda()
+            #     X_dot_unity = torch.clamp(torch.ceil(X_dot), 0.0, 1.0)
+            #     X_G = torch.einsum('ngchw,ngdhw->gdchw', X_hat, X_dot_unity).mean((3,4))
+            #     X_G[:,:self.k,:] = 0.0
+            #     self.sum_G[:,:,:] += -X_G/size_X[0]
+            #     self.counter[self.k:] += 1
         
         # We set mode = -1 when we don't need to update G. For example, when we train for main objective
         X_hat = torch.einsum('bgchw,gdc->bgdhw', X_hat, self.running_rot)
