@@ -1,4 +1,19 @@
-## This repository contains the code for experiments done in paper [Concept Whitening for Interpretable Image Recognition](https://arxiv.org/abs/2002.01650)
+# Concept Whitening for Interpretable Image Recognition
+
+This repository contains the code for experiments in following paper
+
+> Zhi Chen, Yijie Bei, Cynthia Rudin
+>
+> [Concept Whitening for Interpretable Image Recognition](https://rdcu.be/cbOKj)
+> 
+> Nature Machine Intelligence 2, 772–782 (2020). https://doi.org/10.1038/s42256-020-00265-z
+
+arXiv [pre-publication version](https://arxiv.org/abs/2002.01650)
+
+## Short Introduction Video
+[![IMAGE ALT TEXT](http://img.youtube.com/vi/D_LBBQEsQYw/0.jpg)](http://www.youtube.com/watch?v=D_LBBQEsQYw)
+
+## Code Details
 
 ### Recognition
 We have adapted skeleton code from https://github.com/Jongchan/attention-module in train_places.py, and adapted IterNrom implementation from https://github.com/huangleiBuaa/IterNorm as part of the implementation
@@ -116,15 +131,21 @@ An example dataset folder structure looks like the above, where in each bottom l
 
 There generally two types of dataset, main objective dataset and auxiliary concept dataset.
 
-Main dataset: We have been using Places 365 as the main dataset, and it can be downloaded from [Here](http://places2.csail.mit.edu/download.html). It should be devided into train, test, validation sets and stored in corresponding folders shown by the example dataset folder structure above.
+Main dataset: We mainly use Places365 as the main dataset, and it can be downloaded from [Here](http://places2.csail.mit.edu/download.html). It should be divided into train, test, validation sets and stored in corresponding folders shown by the example dataset folder structure above.
 
-Concept dataset: We have been using images in ImageNet as our auxiliary concept dataset, and it can be downloaded from [Here](http://image-net.org/download). The concepts we used are "airplane", "bed", "desk", "fridge", "lamp", "person", "sofa". However, our model generalize to various concepts as well. It should be devided in to train and test and stored in *concept_train/* and */concept_test* as is shown by the example dataset folder structure above. Note that in order to load data easily, the structures of the two folders are different: */concept_train* allows loading images of one concept while */concept_test* allows loading images of all concepts.
+Concept dataset: We mainly use objects in MS COCO as our auxiliary concept dataset, and it can be downloaded from [Here](https://cocodataset.org/#download). Each annotation, e.g., “person” in MS COCO, was used as one concept, and we selected all the images with this annotation (images having “person” in it), cropped them using bounding boxes and used the cropped images as the data representing the concept. However, our model generalize to various concepts as well. It should be divided into train and test and stored in *concept_train/* and */concept_test* as is shown by the example dataset folder structure above. Note that in order to load data easily, the structures of the two folders are different: */concept_train* allows loading images of one concept while */concept_test* allows loading images of all concepts.
 
-### Pretrained weights of standard PlacesCNNs
+We also use the ISIC dataset in the experiments, and it can be downloaded from [Here](https://www.isic-archive.com). The attributes of the lesion images, such as "age<20", are used to define the concepts.
+
+### Pretrained weights
+#### Standard PlacesCNNs
 To accelerate training process of our model, we utilize the pretrained weights of standard CNNs trained on Places365. The weights of those models can be downloaded from [Here](http://places2.csail.mit.edu/download.html)
 
-Once the weights are downloaded, please put them under the folder ./checkpoints/ 
+Once the weights are downloaded, please put them under the folder *checkpoints/*
+#### CNNs with CW
+The weights of models trained with CW can be downloaded from [Here](https://drive.google.com/drive/folders/1iWtusRq9eWIEsuaRPEBGN3QNFQLRRTzR?usp=sharing). The folders are named by concepts trained in CW. For example *airplane_bed_person/* contains weights when CW is trained with concepts "airplane", "bed" and "person".
 
+Once the weights are downloaded, please put the folders of weights under *checkpoints/*
 ### Usage
 train_places.py has many arguments that one can use, here are some interesting ones:  
 --arch: resnet_cw, resnet_original, densnet_cw, densnet_original, vgg16_cw, vgg16_bn_original  
