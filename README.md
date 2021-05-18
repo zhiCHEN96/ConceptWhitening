@@ -133,7 +133,11 @@ There generally two types of dataset, main objective dataset and auxiliary conce
 
 Main dataset: We mainly use Places365 as the main dataset, and it can be downloaded from [Here](http://places2.csail.mit.edu/download.html). It should be divided into train, test, validation sets and stored in corresponding folders shown by the example dataset folder structure above.
 
-Concept dataset: We mainly use objects in MS COCO as our auxiliary concept dataset, and it can be downloaded from [Here](https://cocodataset.org/#download). Each annotation, e.g., “person” in MS COCO, was used as one concept, and we selected all the images with this annotation (images having “person” in it), cropped them using bounding boxes and used the cropped images as the data representing the concept. However, our model generalize to various concepts as well. It should be divided into train and test and stored in *concept_train/* and */concept_test* as is shown by the example dataset folder structure above. Note that in order to load data easily, the structures of the two folders are different: */concept_train* allows loading images of one concept while */concept_test* allows loading images of all concepts.
+Concept dataset: We mainly use objects in MS COCO as our auxiliary concept dataset, and it can be downloaded from [Here](https://cocodataset.org/#download). Each annotation, e.g., “person” in MS COCO, was used as one concept, and we selected all the images with this annotation (images having “person” in it), cropped them using bounding boxes and used the cropped images as the data representing the concept. The preprocessing code of the COCO dataset is provided in *cropping_images_COCO.py*. After downloading the 2017 COCO dataset, one can extract the concept images by running
+```
+python3 cropping_images_COCO.py -coco-path <coco_dataset_folder> -concept-path <folder_containing_concept_datasets>
+```
+. However, our model generalize to various concepts as well. It should be divided into train and test and stored in *concept_train/* and */concept_test* as is shown by the example dataset folder structure above. Note that in order to load data easily, the structures of the two folders are different: */concept_train* allows loading images of one concept while */concept_test* allows loading images of all concepts.
 
 We also use the ISIC dataset in the experiments, and it can be downloaded from [Here](https://www.isic-archive.com). The attributes of the lesion images, such as "age<20", are used to define the concepts.
 
@@ -176,4 +180,3 @@ Similarly, example testing invocation scripts are inside the */scripts* folder, 
 python3 train_places.py --ngpu 1 --workers 2 --arch resnet_cw --depth 18 --epochs 200 --batch-size 64 --lr 0.1 --whitened_layers 5 --concepts airplane,bed,person --prefix RESNET18_PLACES365_CPT_WHITEN_TRANSFER --resume ./checkpoints/RESNET18_PLACES365_CPT_WHITEN_TRANSFER_model_best.pth.tar /data_256 --evaluate
 ```
 You can reproduce all the experiment figures by running *./scripts/test_places_resnet18_concept_whitening_transfer.sh*. Note that figures may not be exactly the same since randomness involved in loading data.
-
