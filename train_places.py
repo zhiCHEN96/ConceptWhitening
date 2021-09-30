@@ -492,7 +492,7 @@ def plot_figures(args, model, test_loader_with_path, train_loader, concept_loade
     # plot_concept_top50(args, test_loader_with_path, model, '7', activation_mode = args.act_mode)
     model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8')
     plot_concept_top50(args, test_loader_with_path, model, '8', activation_mode = args.act_mode)
-    print("Plot 2d slice of representation")
+    # print("Plot 2d slice of representation")
     # plot_concept_representation(args, test_loader_with_path, model, '1', plot_cpt = [concept_name[1],concept_name[2]], activation_mode = args.act_mode)
     # plot_top10(args, plot_cpt = concept_name, layer = 1)
     # plot_top10(args, plot_cpt = concept_name, layer = 8)
