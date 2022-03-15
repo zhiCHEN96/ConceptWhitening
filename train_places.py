@@ -60,7 +60,7 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument("--seed", type=int, default=1234, metavar='BS', help='input batch size for training (default: 64)')
 parser.add_argument("--prefix", type=str, required=True, metavar='PFX', help='prefix for logging & checkpoint saving')
-parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='evaluation only')
+parser.add_argument('--evaluate', type=str, default=None, help='type of evaluation')
 best_prec1 = 0
 
 os.chdir(sys.path[0])
@@ -99,8 +99,6 @@ def main():
         model = VGGBNTransfer(365, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'vgg16_bn', model_file='./checkpoints/vgg16_bn_places365_12_model_best.pth.tar')
     elif args.arch == "vgg16_bn_original":
         model = VGGBN(365, args, arch = 'vgg16_bn', model_file = './checkpoints/vgg16_bn_places365_12_model_best.pth.tar') #'vgg16_bn_places365.pt')
-    
-    # print(args.start_epoch, args.best_prec1)
     
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -162,16 +160,6 @@ def main():
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=False)
 
-#     val_loader_2 = torch.utils.data.DataLoader(
-#         datasets.ImageFolder('/usr/xtmp/zhichen/ConceptWhitening_git/ConceptWhitening/plot/airplane_bed_bench_boat_book_horse_person/resnet_cw18/1_rot_cw_top5', transforms.Compose([
-#             transforms.Scale(256),
-#             transforms.CenterCrop(224),
-#             transforms.ToTensor(),
-#             normalize,
-#         ])),
-#         batch_size=args.batch_size, shuffle=False,
-#         num_workers=args.workers, pin_memory=False)
-    
     test_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(testdir, transforms.Compose([
             transforms.Scale(256),
@@ -192,10 +180,10 @@ def main():
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=False)
 
-    if args.evaluate == False:
+    if args.evaluate is None:
         print("Start training")
         best_prec1 = 0
-        for epoch in range(args.start_epoch, args.start_epoch + 4):
+        for epoch in range(args.start_epoch, args.start_epoch + args.epochs):
             adjust_learning_rate(optimizer, epoch)
             
             # train for one epoch
@@ -219,38 +207,8 @@ def main():
         print(best_prec1)
         validate(test_loader, model, criterion, epoch)
     else:
-        # model = load_resnet_model(args, arch = 'resnet_baseline', depth=args.depth, whitened_layer=args.whitened_layers)
-        # print('resnet_orginal')
-        # for loader in concept_loaders:
-        #     get_representation_distance_to_center(args, loader, '8', arch='resnet_original')
-        # print('resnet_cw')
-        # for loader in concept_loaders:
-        #     get_representation_distance_to_center(args, loader, '8', arch='resnet_cw')    
-        # intra_concept_dot_product_vs_inter_concept_dot_product(args, conceptdir_test, '8', plot_cpt = args.concepts.split(','), arch='resnet_cw')
-        # intra_concept_dot_product_vs_inter_concept_dot_product(args, conceptdir_test, '8', plot_cpt = args.concepts.split(','), arch='resnet_baseline')
-        # intra_concept_dot_product_vs_inter_concept_dot_product(args, conceptdir_test, '8', plot_cpt = args.concepts.split(','), arch='resnet_original')
-        
-        # print("Start testing")
-        # # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='8')
-        # # validate(test_loader, model, criterion, args.start_epoch)
-        # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='7')
-        # validate(test_loader, model, criterion, args.start_epoch)
-        # # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='6')
-        # # validate(test_loader, model, criterion, args.start_epoch)
-        # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='5')
-        # validate(test_loader, model, criterion, args.start_epoch)
-        # # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='4')
-        # # validate(test_loader, model, criterion, args.start_epoch)
-        # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='3')
-        # validate(test_loader, model, criterion, args.start_epoch)
-        # # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='2')
-        # # validate(test_loader, model, criterion, args.start_epoch)
-        # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer='1')
-        # validate(test_loader, model, criterion, args.start_epoch)
-        print("Start Ploting")
         plot_figures(args, model, test_loader_with_path, train_loader, concept_loaders, conceptdir_test)
-        # saliency_map_concept_cover(args, val_loader_2, '1', arch='resnet_cw', dataset='places365', num_concepts=7)
-
+        
 def train(train_loader, concept_loaders, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -263,22 +221,22 @@ def train(train_loader, concept_loaders, model, criterion, optimizer, epoch):
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
-        # if (i + 1) % 800 == 0:
-        #     break
-        if (i + 1) % 30 == 0:
-            model.eval()
-            with torch.no_grad():
-                # update the gradient matrix G
-                for concept_index, concept_loader in enumerate(concept_loaders):
-                    model.module.change_mode(concept_index)
-                    for j, (X, _) in enumerate(concept_loader):
-                        X_var = torch.autograd.Variable(X).cuda()
-                        model(X_var)
-                        break
-                model.module.update_rotation_matrix()
-                # change to ordinary mode
-                model.module.change_mode(-1)
-            model.train()
+        # update the CW parameters, not used when training standard network
+        if args.arch == "resnet_cw":
+            if (i + 1) % 30 == 0:
+                model.eval()
+                with torch.no_grad():
+                    # update the gradient matrix G
+                    for concept_index, concept_loader in enumerate(concept_loaders):
+                        model.module.change_mode(concept_index)
+                        for j, (X, _) in enumerate(concept_loader):
+                            X_var = torch.autograd.Variable(X).cuda()
+                            model(X_var)
+                            break
+                    model.module.update_rotation_matrix()
+                    # change to ordinary mode
+                    model.module.change_mode(-1)
+                model.train()
         # measure data loading time
         data_time.update(time.time() - end)
         
@@ -479,73 +437,44 @@ def plot_figures(args, model, test_loader_with_path, train_loader, concept_loade
     if not os.path.exists('./plot/'+'_'.join(concept_name)):
         os.mkdir('./plot/'+'_'.join(concept_name))
     
-    # print("Plot top50 activated images")
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='1')
-    # plot_concept_top50(args, test_loader_with_path, model, '1', activation_mode = args.act_mode)
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='4')
-    # plot_concept_top50(args, test_loader_with_path, model, '4', activation_mode = args.act_mode)
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='5')
-    # plot_concept_top50(args, test_loader_with_path, model, '5', activation_mode = args.act_mode)
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='6')
-    # plot_concept_top50(args, test_loader_with_path, model, '6', activation_mode = args.act_mode)
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='7')
-    # plot_concept_top50(args, test_loader_with_path, model, '7', activation_mode = args.act_mode)
-    model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8')
-    plot_concept_top50(args, test_loader_with_path, model, '8', activation_mode = args.act_mode)
-    # print("Plot 2d slice of representation")
-    # plot_concept_representation(args, test_loader_with_path, model, '1', plot_cpt = [concept_name[1],concept_name[2]], activation_mode = args.act_mode)
-    # plot_top10(args, plot_cpt = concept_name, layer = 1)
-    # plot_top10(args, plot_cpt = concept_name, layer = 8)
-
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8')
-    # print("Plot top50 activated images")
-    # plot_concept_top50(args, test_loader_with_path, model, '8', activation_mode = args.act_mode)
-    # print("Plot 2d slice of representation")
-    # plot_concept_representation(args, test_loader_with_path, model, '8', plot_cpt = [concept_name[1],concept_name[2]], activation_mode = args.act_mode)
-    # plot_top10(args, plot_cpt = concept_name, layer = 8)
-
-    # print("Plot correlation")
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8')
-    # args.arch = 'resnet_cw'
-    # plot_correlation(args, test_loader_with_path, model, 8)
-    # args.arch = 'resnet_original'
-    # model = load_resnet_model(args, arch = 'resnet_original', depth=18)
-    # plot_correlation(args, test_loader_with_path, model, 8)
-    # model = load_resnet_model(args, arch = 'resnet_baseline', depth=18, whitened_layer='8')
-    # args.arch = 'resnet_baseline'
-    # plot_correlation(args, test_loader_with_path, model, 8)
+    if args.evaluate == 'plot_top50':
+        print("Plot top50 activated images")
+        model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8')
+        plot_concept_top50(args, test_loader_with_path, model, '8', activation_mode = args.act_mode)
+    elif args.evaluate == 'plot_auc':
+        print("Plot AUC-concept_purity")
+        print("Note: this requires multiple models trained with CW on different layers")
+        aucs_cw = plot_auc_cw(args, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, activation_mode = args.act_mode)
+        print("Running AUCs svm")
+        model = load_resnet_model(args, arch='resnet_original', depth=18)
+        aucs_svm = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'svm')
+        print("Running AUCs lr")
+        model = load_resnet_model(args, arch='resnet_original', depth=18)
+        aucs_lr = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'lr')
+        print("Running AUCs best filter")
+        model = load_resnet_model(args, arch='resnet_original', depth=18)
+        aucs_filter = plot_auc_filter(args, model, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name)
+        print("AUC plotting")
+        plot_auc(args, 0, 0, 0, 0, plot_cpt = concept_name)
+        print("End plotting")
     
-    # print("Plot trajectory")
-    # args.arch = 'resnet_cw'
-    # plot_trajectory(args, test_loader_with_path, '1,2,3,4,5,6,7,8', plot_cpt = [concept_name[0],concept_name[1]])
-     
-    # print("Plot AUC-concept_purity")
-    # aucs_cw = plot_auc_cw(args, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, activation_mode = args.act_mode)
-    # print("Running AUCs svm")
-    # model = load_resnet_model(args, arch='resnet_original', depth=18)
-    # aucs_svm = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'svm')
-    # print("Running AUCs lr")
-    # model = load_resnet_model(args, arch='resnet_original', depth=18)
-    # aucs_lr = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'lr')
-    # print("Running AUCs best filter")
-    # model = load_resnet_model(args, arch='resnet_original', depth=18)
-    # aucs_filter = plot_auc_filter(args, model, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name)
-    # print("AUC plotting")
-    # plot_auc(args, 0, 0, 0, 0, plot_cpt = concept_name)
-    # print("End plotting")
-    # model = load_resnet_model(args, arch = 'resnet_baseline', depth=18, whitened_layer='8')
-    # print("Running AUCs best filter")
-    # aucs_filter = plot_auc_filter(args, model, conceptdir, '8', plot_cpt = concept_name)
-
 def save_checkpoint(state, is_best, prefix, checkpoint_folder='./checkpoints'):
-    concept_name = '_'.join(args.concepts.split(','))
-    if not os.path.exists(os.path.join(checkpoint_folder,concept_name)):
-        os.mkdir(os.path.join(checkpoint_folder,concept_name))
-    filename = os.path.join(checkpoint_folder,concept_name,'%s_checkpoint.pth.tar'%prefix)
-    torch.save(state, filename)
-    if is_best:
-         shutil.copyfile(filename, os.path.join(checkpoint_folder,concept_name,'%s_model_best.pth.tar'%prefix))
-
+    if args.arch == "resnet_cw" or args.arch == "densenet_cw" or args.arch == "vgg16_cw":
+        # save checkpoints for model with CW layer
+        concept_name = '_'.join(args.concepts.split(','))
+        if not os.path.exists(os.path.join(checkpoint_folder,concept_name)):
+            os.mkdir(os.path.join(checkpoint_folder,concept_name))
+        filename = os.path.join(checkpoint_folder,concept_name,'%s_checkpoint.pth.tar'%prefix)
+        torch.save(state, filename)
+        if is_best:
+            shutil.copyfile(filename, os.path.join(checkpoint_folder,concept_name,'%s_model_best.pth.tar'%prefix))
+    elif args.arch == "resnet_original" or args.arch == "densenet_original" or args.arch == "vgg16_original":
+        # save checkpoints for model without CW layer
+        filename = os.path.join(checkpoint_folder,'%s_checkpoint.pth.tar'%prefix)
+        torch.save(state, filename)
+        if is_best:
+            shutil.copyfile(filename, os.path.join(checkpoint_folder,'%s_model_best.pth.tar'%prefix))
+    
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

@@ -53,14 +53,14 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
-parser.add_argument('--concepts', type=str, required=True)
+parser.add_argument('--concepts', type=str, default=None)
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument("--seed", type=int, default=1234, metavar='BS', help='input batch size for training (default: 64)')
 parser.add_argument("--prefix", type=str, required=True, metavar='PFX', help='prefix for logging & checkpoint saving')
-parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='evaluation only')
+parser.add_argument('--evaluate', type=str, default=None, help='type of evaluation')
 best_prec1 = 0
 
 os.chdir(sys.path[0])
@@ -78,14 +78,16 @@ def main():
     torch.cuda.manual_seed_all(args.seed)
     random.seed(args.seed)
 
-    args.prefix += '_'+'_'.join(args.whitened_layers.split(','))
+    if args.arch == "resnet_cw" or args.arch == "densenet_cw" or args.arch == "vgg16_cw":
+        args.prefix += '_'+'_'.join(args.whitened_layers.split(','))
 
     #create model
     if args.arch == "resnet_cw":
         if args.depth == 50:
             model = ResidualNetTransfer(2, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'resnet50', layers = [3, 4, 6, 3], model_file='./checkpoints/resnet50_isic.pth.tar')
         elif args.depth == 18:
-            model = ResidualNetTransfer(2, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'resnet18', layers = [2, 2, 2, 2])#, model_file='./checkpoints/resnet18_isic.pth.tar')
+            model = ResidualNetTransfer(2, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'resnet18', layers = [2, 2, 2, 2], model_file='./checkpoints/resnet18_isic_model_best.pth.tar')
+            print(args.start_epoch)
     elif args.arch == "resnet_original" or args.arch == "resnet_baseline":
         if args.depth == 50:
             model = ResidualNetBN(2, args, arch = 'resnet50', layers = [3, 4, 6, 3], model_file='./checkpoints/resnet50_isic.pth.tar')
@@ -101,8 +103,6 @@ def main():
         model = VGGBNTransfer(2, args, [int(x) for x in args.whitened_layers.split(',')], arch = 'vgg16_bn', model_file='./checkpoints/vgg16_bn_places365_12_model_best.pth.tar')
     elif args.arch == "vgg16_bn_original":
         model = VGGBN(2, args, arch = 'vgg16_bn', model_file = './checkpoints/vgg16_bn_places365_12_model_best.pth.tar') #'vgg16_bn_places365.pt')
-    
-    # print(args.start_epoch, args.best_prec1)
     
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -129,25 +129,26 @@ def main():
     conceptdir_test = os.path.join(args.data, 'concept_test')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
-    # normalize = transforms.Normalize(mean=[0.7044832 0.5509753 0.5327961],
-    #                              std=[0.09999301 0.12828484 0.14426188])
 
     train_loader = balanced_data_loader(args, traindir)
     test_loader_2 = balanced_data_loader(args, testdir, 'test')
 
-    concept_loaders = [
-        torch.utils.data.DataLoader(
-        datasets.ImageFolder(os.path.join(conceptdir_train, concept), transforms.Compose([
-            # transforms.Scale(256),
-            transforms.RandomSizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=False)
-        for concept in args.concepts.split(',')
-    ]
+    if args.arch == "resnet_cw" or args.arch == "densenet_cw" or args.arch == "vgg16_cw":
+        concept_loaders = [
+                torch.utils.data.DataLoader(
+                datasets.ImageFolder(os.path.join(conceptdir_train, concept), transforms.Compose([
+                    transforms.Scale(256),
+                    transforms.RandomSizedCrop(224),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                ])),
+                batch_size=args.batch_size, shuffle=True,
+                num_workers=args.workers, pin_memory=False)
+                for concept in args.concepts.split(',')
+            ]
+    else:
+        concept_loaders = [None]
     
     test_dataset = datasets.ImageFolder(testdir, transforms.Compose([
             transforms.Scale(256),
@@ -155,7 +156,7 @@ def main():
             transforms.ToTensor(),
             normalize,]))
     args.test_weights = get_class_weights(test_dataset.imgs, len(test_dataset.classes))
-    print(args.test_weights)
+    print('Class weights:',args.test_weights)
     test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=False)
@@ -169,27 +170,15 @@ def main():
         ])),
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=False)
-
-    val_loader_2 = torch.utils.data.DataLoader(
-        datasets.ImageFolder('/usr/xtmp/zhichen/ConceptWhitening_git/ConceptWhitening/plot/age_le_20_size_geeq_10/resnet_cw18/76_dim_pos/', transforms.Compose([
-            transforms.Scale(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=False)
-    # model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer=args.whitened_layers, dataset = 'isic')
-
-    if args.evaluate == False:
+    
+    if args.evaluate is None:
         print("Start training")
         best_prec1 = 0
-        for epoch in range(args.start_epoch, args.start_epoch + 100):
+        for epoch in range(args.start_epoch, args.start_epoch + args.epochs):
             adjust_learning_rate(optimizer, epoch)
             
-            # train for one epoch
+            # training
             if args.arch == "resnet_cw" or args.arch == "resnet_original":
-                # train(train_loader, None, model, criterion, optimizer, epoch)
                 train(train_loader, concept_loaders, model, criterion, optimizer, epoch)
             elif args.arch == "resnet_baseline":
                 train_baseline(train_loader, concept_loaders, model, criterion, optimizer, epoch)
@@ -209,20 +198,8 @@ def main():
         print(best_prec1)
         validate(test_loader, model, criterion, epoch)
     else:
-        model = load_resnet_model(args, arch = args.arch, depth=args.depth, whitened_layer=args.whitened_layers, dataset = 'isic')
-        # get_representation_distance_to_center(args, test_loader, '8', arch='resnet_original')
-        # intra_concept_dot_product_vs_inter_concept_dot_product(args, conceptdir_test, '8', plot_cpt = args.concepts.split(','), arch='resnet_cw', dataset = 'isic')
-        # intra_concept_dot_product_vs_inter_concept_dot_product(args, conceptdir_test, '8', plot_cpt = args.concepts.split(','), arch='resnet_baseline')
-        # intra_concept_dot_product_vs_inter_concept_dot_product(args, conceptdir_test, '8', plot_cpt = args.concepts.split(','), arch='resnet_original', dataset = 'isic')
+        plot_figures(args, model, test_loader_with_path, train_loader, concept_loaders, conceptdir_test)
         
-        # print("Start testing")
-        # validate(test_loader, model, criterion, args.start_epoch)
-        # print("Start Ploting")
-        # plot_figures(args, model, test_loader_with_path, train_loader, concept_loaders, conceptdir_test)
-        # concept_permutation_importance(args, test_loader_2, '5', criterion, arch='resnet_cw', dataset='isic', num_concepts=3)
-        # concept_gradient_importance(args, test_loader_2, '8', criterion, arch='resnet_cw', dataset='isic')
-        saliency_map_concept_cover_2(args, val_loader_2, '8', arch='resnet_cw', dataset='isic', num_concepts=76)
-
 def train(train_loader, concept_loaders, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -234,21 +211,23 @@ def train(train_loader, concept_loaders, model, criterion, optimizer, epoch):
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
-        # if (i + 1) % 20 == 0:
-        #     model.eval()
-        #     with torch.no_grad():
-        #         # update the gradient matrix G
-        #         for concept_index, concept_loader in enumerate(concept_loaders):
-        #             # print(concept_index)
-        #             model.module.change_mode(concept_index)
-        #             for j, (X, _) in enumerate(concept_loader):
-        #                 X_var = torch.autograd.Variable(X).cuda()
-        #                 model(X_var)
-        #                 break
-        #         model.module.update_rotation_matrix()
-        #         # change to ordinary mode
-        #         model.module.change_mode(-1)
-        #     model.train()
+        # update the CW parameters, not used when training standard network
+        if args.arch == "resnet_cw":
+            if (i + 1) % 20 == 0:
+                model.eval()
+                with torch.no_grad():
+                    # update the gradient matrix G
+                    for concept_index, concept_loader in enumerate(concept_loaders):
+                        # print(concept_index)
+                        model.module.change_mode(concept_index)
+                        for j, (X, _) in enumerate(concept_loader):
+                            X_var = torch.autograd.Variable(X).cuda()
+                            model(X_var)
+                            break
+                    model.module.update_rotation_matrix()
+                    # change to ordinary mode
+                    model.module.change_mode(-1)
+                model.train()
         # measure data loading time
         data_time.update(time.time() - end)
         
@@ -444,64 +423,45 @@ def plot_figures(args, model, test_loader_with_path, train_loader, concept_loade
     if not os.path.exists('./plot/'+'_'.join(concept_name)):
         os.mkdir('./plot/'+'_'.join(concept_name))
     
-    # print("Plot top50 activated images")
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='1', dataset = 'isic')
-    # plot_concept_top50(args, test_loader_with_path, model, '1', activation_mode = args.act_mode)
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8', dataset = 'isic')
-    model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8', dataset = 'isic')
-    # plot_concept_top50(args, test_loader_with_path, model, '8', 297, activation_mode = args.act_mode)
-    plot_concept_top50(args, test_loader_with_path, model, '8', 76, activation_mode = args.act_mode)
-    # plot_concept_top50(args, test_loader_with_path, model, '8', 313, activation_mode = args.act_mode)
-    # print("Plot 2d slice of representation")
-    # plot_concept_representation(args, test_loader_with_path, model, '1', plot_cpt = [concept_name[1],concept_name[2]], activation_mode = args.act_mode)
-    # plot_top10(args, plot_cpt = concept_name, layer = 1)
-
-    # print("Plot correlation")
-    # model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8', dataset = 'isic')
-    # args.arch = 'resnet_cw'
-    # plot_correlation(args, test_loader_with_path, model, 8)
-    # args.arch = 'resnet_original'
-    # model = load_resnet_model(args, arch = 'resnet_original', depth=18, dataset = 'isic')
-    # plot_correlation(args, test_loader_with_path, model, 8)
-    # model = load_resnet_model(args, arch = 'resnet_baseline', depth=18, whitened_layer='8', dataset = 'isic')
-    # args.arch = 'resnet_baseline'
-    # plot_correlation(args, test_loader_with_path, model, 8)
-    
-    # print("Plot trajectory")
-    # args.arch = 'resnet_cw'
-    # plot_trajectory(args, test_loader_with_path, '1,2,3,4,5,6,7,8', plot_cpt = [concept_name[0],concept_name[1]])
-     
-    # print("Plot AUC-concept_purity")
-    # aucs_cw = plot_auc_cw(args, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, activation_mode = args.act_mode, dataset = 'isic')
-    # print("Running AUCs svm")
-    # model = load_resnet_model(args, arch='resnet_original', depth=18, dataset = 'isic')
-    # aucs_svm = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'svm')
-    # print("Running AUCs lr")
-    # model = load_resnet_model(args, arch='resnet_original', depth=18, dataset = 'isic')
-    # aucs_lr = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'lr')
-    # print("Running AUCs best filter")
-    # model = load_resnet_model(args, arch='resnet_original', depth=18, dataset = 'isic')
-    # aucs_filter = plot_auc_filter(args, model, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name)
-    # print("AUC plotting")
-    # plot_auc(args, 0, 0, 0, 0, plot_cpt = concept_name)
-    # print("End plotting")
-    # model = load_resnet_model(args, arch = 'resnet_baseline', depth=18, whitened_layer='8', dataset = 'isic')
-    # print("Running AUCs best filter")
-    # aucs_filter = plot_auc_filter(args, model, conceptdir, '8', plot_cpt = concept_name)
+    if args.evaluate == 'plot_top50':
+        print("Plot top50 activated images")
+        model = load_resnet_model(args, arch = 'resnet_cw', depth=18, whitened_layer='8', dataset = 'isic')
+        plot_concept_top50(args, test_loader_with_path, model, '8', activation_mode = args.act_mode)
+        print("End plotting")
+    elif args.evaluate == 'plot_auc':
+        print("Plot AUC-concept_purity")
+        print("Note: this requires multiple models trained with CW on different layers")
+        aucs_cw = plot_auc_cw(args, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, activation_mode = args.act_mode, dataset = 'isic')
+        print("Running AUCs svm")
+        model = load_resnet_model(args, arch='resnet_original', depth=18, dataset = 'isic')
+        aucs_svm = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'svm')
+        print("Running AUCs lr")
+        model = load_resnet_model(args, arch='resnet_original', depth=18, dataset = 'isic')
+        aucs_lr = plot_auc_lm(args, model, concept_loaders, train_loader, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name, model_type = 'lr')
+        print("Running AUCs best filter")
+        model = load_resnet_model(args, arch='resnet_original', depth=18, dataset = 'isic')
+        aucs_filter = plot_auc_filter(args, model, conceptdir, '1,2,3,4,5,6,7,8', plot_cpt = concept_name)
+        print("AUC plotting")
+        plot_auc(args, 0, 0, 0, 0, plot_cpt = concept_name)
+        print("End plotting")
 
 def save_checkpoint(state, is_best, prefix, checkpoint_folder='./checkpoints'):
-    concept_name = '_'.join(args.concepts.split(','))
-    if not os.path.exists(os.path.join(checkpoint_folder,concept_name)):
-        os.mkdir(os.path.join(checkpoint_folder,concept_name))
-    filename = os.path.join(checkpoint_folder,concept_name,'%s_checkpoint.pth.tar'%prefix)
-    torch.save(state, filename)
-    if is_best:
-         shutil.copyfile(filename, os.path.join(checkpoint_folder,concept_name,'%s_model_best.pth.tar'%prefix))
-    # filename = os.path.join(checkpoint_folder,'%s_checkpoint.pth.tar'%prefix)
-    # torch.save(state, filename)
-    # if is_best:
-    #      shutil.copyfile(filename, os.path.join(checkpoint_folder,'%s_model_best.pth.tar'%prefix))
-
+    if args.arch == "resnet_cw" or args.arch == "densenet_cw" or args.arch == "vgg16_cw":
+        # save checkpoints for model with CW layer
+        concept_name = '_'.join(args.concepts.split(','))
+        if not os.path.exists(os.path.join(checkpoint_folder,concept_name)):
+            os.mkdir(os.path.join(checkpoint_folder,concept_name))
+        filename = os.path.join(checkpoint_folder,concept_name,'%s_checkpoint.pth.tar'%prefix)
+        torch.save(state, filename)
+        if is_best:
+            shutil.copyfile(filename, os.path.join(checkpoint_folder,concept_name,'%s_model_best.pth.tar'%prefix))
+    elif args.arch == "resnet_original" or args.arch == "densenet_original" or args.arch == "vgg16_original":
+        # save checkpoints for model without CW layer
+        filename = os.path.join(checkpoint_folder,'%s_checkpoint.pth.tar'%prefix)
+        torch.save(state, filename)
+        if is_best:
+            shutil.copyfile(filename, os.path.join(checkpoint_folder,'%s_model_best.pth.tar'%prefix))
+    
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -523,7 +483,7 @@ class AverageMeter(object):
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = args.lr * (0.1 ** (epoch // 30))
+    lr = args.lr * (0.1 ** (epoch // 10))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 

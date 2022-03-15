@@ -19,7 +19,7 @@ class ResidualNetTransfer(nn.Module):
             checkpoint = torch.load(model_file, map_location='cpu')
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
-            #print(checkpoint['best_prec1'])
+            print(args.start_epoch,checkpoint['best_prec1'])
             state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
             state_dict = {str.replace(k,'bw','bn'): v for k,v in state_dict.items()}
             self.model.load_state_dict(state_dict)
@@ -195,7 +195,7 @@ class ResidualNetBN(nn.Module):
             args.start_epoch = checkpoint['epoch']
             args.best_prec1 = checkpoint['best_prec1']
             #print(checkpoint.keys())
-            print(args.best_prec1)
+            print(args.start_epoch,args.best_prec1)
             state_dict = {str.replace(k,'module.',''): v for k,v in checkpoint['state_dict'].items()}
             self.model.load_state_dict(state_dict)
 

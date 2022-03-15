@@ -165,7 +165,7 @@ def plot_concept_top50(args, val_loader, model, whitened_layers, print_other = F
                 #     for item in arr:
                 #         f.write(item[1]+'\n')
 
-                for j in range(5):
+                for j in range(50):
                     src = arr[j][1]
                     copyfile(src, output_path+'/'+'layer'+layer+'_'+str(j+1)+'.jpg')  
                     # copyfile(src, output_path+'/'+'layer'+layer+'_'+str(j+1)+'_reversed.jpg')  
@@ -1038,7 +1038,7 @@ def plot_correlation(args, val_loader, model, layer):
         for i, (input, _, path) in enumerate(val_loader):
             input_var = torch.autograd.Variable(input).cuda()
             model(input_var)
-            if i==50:
+            if i==100:
                 break
         # print(np.shape(outputs),np.shape(outputs[0]))
         #activation = np.array(outputs).reshape((-1,np.shape(outputs)[2]))
@@ -1278,8 +1278,7 @@ def saliency_map_concept(args, val_loader, layer, arch='resnet_cw', dataset='isi
             outputs = []
 
 def saliency_map_concept_cover(args, val_loader, layer, arch='resnet_cw', dataset='isic', num_concepts=7):
-    # dst = './plot/' + '_'.join(args.concepts.split(',')) + '/' + args.arch + str(args.depth) + '/saliency_map_concept_cover_fine_grain_2/'
-    dst = '/usr/xtmp/zhichen/temp_plots_layer1_3/'
+    dst = './plot/' + '_'.join(args.concepts.split(',')) + '/' + args.arch + str(args.depth) + '/saliency_map_concept_cover_fine_grain/'
     try:
         os.mkdir(dst)
     except:
@@ -1374,8 +1373,7 @@ def saliency_map_concept_cover(args, val_loader, layer, arch='resnet_cw', datase
                 print("saved: " + str(j))
 
 def saliency_map_concept_cover_2(args, val_loader, layer, arch='resnet_cw', dataset='isic', num_concepts=7):
-    # dst = './plot/' + '_'.join(args.concepts.split(',')) + '/' + args.arch + str(args.depth) + '/saliency_map_concept_cover_fine_grain_2/'
-    dst = '/usr/xtmp/zhichen/temp_plots_isic_3/'
+    dst = './plot/' + '_'.join(args.concepts.split(',')) + '/' + args.arch + str(args.depth) + '/saliency_map_concept_cover_fine_grain_2/'
     try:
         os.mkdir(dst)
     except:
@@ -1491,11 +1489,10 @@ def load_resnet_model(args, arch = 'resnet_original', depth=18, checkpoint_folde
             raise Exception("whitened_layer argument is required")
         else:
             if depth == 50:
-                model = ResidualNetTransfer(n_classes, args, [int(whitened_layer)], arch = 'resnet50', layers = [3, 4, 6, 3], model_file=os.path.join(checkpoint_folder, 'resnet50_{}.pth.tar'.format(dataset)))
+                model = ResidualNetTransfer(n_classes, args, [int(whitened_layer)], arch = 'resnet50', layers = [3, 4, 6, 3])
                 checkpoint_name = '{}_{}_model_best.pth.tar'.format(prefix_name, whitened_layer)
             elif depth == 18:
-                model = ResidualNetTransfer(n_classes, args, [int(whitened_layer)], arch = 'resnet18', layers = [2, 2, 2, 2], model_file=os.path.join(checkpoint_folder, 'resnet18_{}.pth.tar'.format(dataset)))
-                # model = ResidualNetTransfer(n_classes, args, [int(whitened_layer)], arch = 'resnet18', layers = [2, 2, 2, 2], model_file=None)
+                model = ResidualNetTransfer(n_classes, args, [int(whitened_layer)], arch = 'resnet18', layers = [2, 2, 2, 2], model_file=None)
                 checkpoint_name = '{}_{}_checkpoint.pth.tar'.format(prefix_name, whitened_layer)
         model = torch.nn.DataParallel(model, device_ids=list(range(args.ngpu)))
         model = model.cuda()
