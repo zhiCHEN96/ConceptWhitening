@@ -140,9 +140,9 @@ python3 cropping_images_COCO.py -coco-path <coco_dataset_folder> -concept-path <
 . However, our model generalize to various concepts as well. It should be divided into train and test and stored in *concept_train/* and */concept_test* as is shown by the example dataset folder structure above. Note that in order to load data easily, the structures of the two folders are different: */concept_train* allows loading images of one concept while */concept_test* allows loading images of all concepts.
 
 We also use the ISIC dataset in the experiments, and it can be downloaded from [Here](https://www.isic-archive.com). One can download the entire dataset using this [downloader code](https://github.com/GalAvineri/ISIC-Archive-Downloader). The attributes of the lesion images, stored as metadata, such as "age", are used to define the concepts. After downloading the ISIC dataset, one can run
-'''
+```
 python3 extract_ISIC_concepts.py
-'''
+```
 to create the dataset used in the paper and extract the concepts (age<20 and size>=10mm) from the raw ISIC images.
 
 ### Pretrained weights
